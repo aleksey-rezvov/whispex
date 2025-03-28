@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Whisper Dictation
+GenericName=Speech Recognition
+Comment=Распознавание речи через Whisper
+Exec=/home/arezvov/projects/ais/whisper-simple-dictation/whisper_tray.py
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;AudioVideo;
+StartupNotify=false
+MimeType= 
