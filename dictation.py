@@ -14,6 +14,18 @@ import sounddevice as sd
 # ! you can change this rec_key value
 rec_key = pynput.keyboard.Key.alt_r
 
+# Development prompt to improve transcription for programming and development topics
+DEV_PROMPT = """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
+- Software development and programming
+- System administration and DevOps
+- Software architecture and design patterns
+- Project management and requirements engineering
+- Databases and data structures
+- Algorithms and computational complexity
+- Cloud technologies and infrastructure
+
+When uncertain about a word or phrase, prioritize technical meaning over common usage. Preserve English technical terms even within Russian sentences. The speaker may switch between Russian and English mid-sentence when discussing technical concepts."""
+
 whisper_samplerate = 16000  # sampling rate that whisper uses
 recording_samplerate = 48000  # multiple of whisper_samplerate, widely supported
 
@@ -52,8 +64,10 @@ if args.on_callback is not None:
 
 # %%
 def get_text_local(audio, context=None):
+    actual_prompt = context or DEV_PROMPT
+    print(f"🎯 Local request: lang={args.language}, prompt=\"{actual_prompt[:30]}...\"")
     segments, info = model.transcribe(
-        audio, beam_size=5, language=args.language, initial_prompt=context
+        audio, beam_size=5, language=args.language, initial_prompt=actual_prompt
     )
     segments = list(segments)
     text = " ".join([segment.text.strip() for segment in segments])
@@ -63,14 +77,14 @@ def get_text_local(audio, context=None):
 def get_text_remote(audio, context=None):
     tmp_audio_filename = "tmp.wav"
     soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
-    # print(time.time())
+    actual_prompt = context or DEV_PROMPT
+    print(f"🌐 OpenAI request: lang={args.language}, prompt=\"{actual_prompt[:30]}...\"")
     api_response = client.audio.transcriptions.create(
         model="whisper-1",
         file=open(tmp_audio_filename, "rb"),
         language=args.language,
-        prompt=context,
+        prompt=actual_prompt,
     )
-    # print(time.time())
     return api_response.text
 
 
@@ -155,7 +169,7 @@ def record_and_process():
     #     context = get_context()
     #     # limit the length of context
     #     context = context[-args.context_limit_chars :]
-    context = None
+    context = None  # Use dev-prompt by default
 
     # ! transcribe
     if args.engine == "local":
@@ -196,6 +210,7 @@ def on_release(key):
 # %%
 if args.language is not None:
     print(f"Using language: {args.language}")
+print(f"Using development prompt: {DEV_PROMPT}")
 with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
     print(f"Press {rec_key} to start recording")
     try:
