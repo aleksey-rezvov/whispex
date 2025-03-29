@@ -5,6 +5,8 @@ import argparse
 import subprocess
 import threading
 import time
+import signal
+import sys
 
 import numpy as np
 import pynput
@@ -13,6 +15,12 @@ import sounddevice as sd
 
 # ! you can change this rec_key value
 rec_key = pynput.keyboard.Key.alt_r
+
+# Переопределяем стандартный print для автоматического сброса буфера
+original_print = print
+def print(*args, **kwargs):
+    kwargs['flush'] = True
+    return original_print(*args, **kwargs)
 
 # Development prompt to improve transcription for programming and development topics
 DEV_PROMPT = """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
@@ -129,10 +137,13 @@ def type_using_clipboard(text):
 rec_key_pressed = False
 time_last_used = time.time()
 
+# Глобальная переменная для аудио-потока
+stream = None
 
 def record_and_process():
     # ! record
     # while is pressed, record audio
+    global stream
     audio_chunks = []
 
     def audio_callback(indata, frames, time, status):
@@ -151,6 +162,7 @@ def record_and_process():
         time.sleep(0.005)
     stream.stop()
     stream.close()
+    stream = None
     recorded_audio = np.concatenate(audio_chunks)[:, 0]
 
     # ! check if not too short
@@ -211,6 +223,28 @@ def on_release(key):
 if args.language is not None:
     print(f"Using language: {args.language}")
 print(f"Using development prompt: {DEV_PROMPT}")
+
+# Добавляем обработчик сигналов для корректного завершения
+def signal_handler(sig, frame):
+    print(f"\nПолучен сигнал {sig}, корректное завершение...")
+    # Явное закрытие всех потоков и ресурсов
+    if 'listener' in globals() and listener:
+        listener.stop()
+    
+    # Закрытие аудио-устройств, если они открыты
+    if 'stream' in globals() and stream:
+        try:
+            stream.stop()
+            stream.close()
+        except:
+            pass
+    
+    sys.exit(0)
+
+# Регистрируем обработчики различных сигналов завершения
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
 with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
     print(f"Press {rec_key} to start recording")
     try:
@@ -222,6 +256,12 @@ with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as liste
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nExiting...")
+        
+# Явное закрытие всех потоков перед выходом
+if 'listener' in globals() and listener:
+    listener.stop()
+
+print("Программа успешно завершена")
 
 # %% play around with getting window titles
 # # requires pip install python-xlib and I think xorg stuff

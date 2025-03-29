@@ -4,6 +4,7 @@ import signal
 import sys
 import subprocess
 import threading
+import time
 from PyQt5 import QtWidgets, QtGui, QtCore
 
 class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
@@ -33,12 +34,8 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         self.menu = QtWidgets.QMenu()
         
         # Добавляем действия для запуска
-        self.start_remote_action = self.menu.addAction("Запустить удаленный Whisper")
+        self.start_remote_action = self.menu.addAction("Запустить")
         self.start_remote_action.triggered.connect(self.start_remote_whisper)
-        
-        # Добавляем прямой запуск Python-скрипта
-        self.direct_remote_action = self.menu.addAction("Прямой запуск (OpenAI)")
-        self.direct_remote_action.triggered.connect(self.start_direct_remote)
         
         # Добавляем действие для остановки
         self.stop_action = self.menu.addAction("Остановить")
@@ -68,92 +65,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         if not self.running:
             self.start_whisper("run_dictation_remote.sh")
     
-    def start_direct_remote(self):
-        if not self.running:
-            self.log_window.append_text("Запускаю Python напрямую из venv...")
-            
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            python_script = os.path.join(script_dir, "dictation.py")
-            venv_python = os.path.join(script_dir, "venv/bin/python3")
-            
-            if not os.path.exists(venv_python):
-                self.log_window.append_text(f"ОШИБКА: Python из виртуального окружения не найден: {venv_python}")
-                return
-                
-            # Настраиваем окружение
-            env = os.environ.copy()
-            
-            # Загружаем OpenAI API ключ
-            try:
-                openai_token_path = os.path.expanduser("~/.config/openai.token")
-                if os.path.exists(openai_token_path):
-                    with open(openai_token_path, 'r') as token_file:
-                        env['OPENAI_API_KEY'] = token_file.read().strip()
-                        self.log_window.append_text(f"OpenAI API ключ загружен")
-                else:
-                    self.log_window.append_text(f"ОШИБКА: Файл OpenAI API ключа не найден: {openai_token_path}")
-                    return
-            except Exception as e:
-                self.log_window.append_text(f"ОШИБКА при чтении OpenAI API ключа: {str(e)}")
-                return
-            
-            # Добавляем XDG_RUNTIME_DIR, важную для доступа к pulseaudio
-            if 'XDG_RUNTIME_DIR' not in env and os.path.exists('/run/user'):
-                uid = os.getuid()
-                xdg_path = f"/run/user/{uid}"
-                if os.path.exists(xdg_path):
-                    env['XDG_RUNTIME_DIR'] = xdg_path
-                    self.log_window.append_text(f"Установлен XDG_RUNTIME_DIR: {xdg_path}")
-            
-            # Выводим важные переменные окружения
-            self.log_window.append_text("--- Переменные окружения ---")
-            for var in ['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'PULSE_SERVER', 'OPENAI_API_KEY']:
-                if var in env:
-                    # Скрываем полное значение API ключа
-                    if var == 'OPENAI_API_KEY':
-                        value = env[var][:5] + "..." + env[var][-5:] if len(env[var]) > 10 else "[УСТАНОВЛЕН]"
-                    else:
-                        value = env[var]
-                    self.log_window.append_text(f"{var}={value}")
-                else:
-                    self.log_window.append_text(f"{var}=ОТСУТСТВУЕТ")
-            self.log_window.append_text("---------------------------")
-            
-            try:
-                # Важно: передаем ru как первый позиционный аргумент после remote
-                command = [venv_python, python_script, "remote", "ru"]
-                self.log_window.append_text(f"Используем Python из venv: {venv_python}")
-                self.log_window.append_text(f"Команда запуска: {' '.join(command)}")
-                
-                self.process = subprocess.Popen(
-                    command, 
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True,
-                    bufsize=1,
-                    env=env,
-                    cwd=script_dir
-                )
-                
-                # Обновляем состояние GUI
-                self.running = True
-                self.start_remote_action.setEnabled(False)
-                self.direct_remote_action.setEnabled(False)
-                self.stop_action.setEnabled(True)
-                
-                # Запускаем поток для чтения вывода
-                self.output_reader = threading.Thread(target=self.read_output)
-                self.output_reader.daemon = True
-                self.output_reader.start()
-                
-                # Показываем уведомление
-                self.showMessage("Whisper Dictation", "Сервис распознавания речи запущен напрямую (русский язык)", QtGui.QIcon.fromTheme("audio-input-microphone"), 3000)
-                
-            except Exception as e:
-                self.log_window.append_text(f"Ошибка запуска Python: {str(e)}")
-                import traceback
-                self.log_window.append_text(traceback.format_exc())
-    
     def start_whisper(self, script_name):
         self.log_window.append_text(f"Запускаю {script_name}...")
         
@@ -162,6 +73,9 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         
         # Настраиваем окружение для запуска скрипта
         env = os.environ.copy()
+        
+        # Отключаем буферизацию Python вывода
+        env['PYTHONUNBUFFERED'] = '1'
         
         # Если это удаленный скрипт, добавляем OPENAI_API_KEY из файла
         if 'remote' in script_name:
@@ -199,7 +113,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             # Обновляем состояние GUI
             self.running = True
             self.start_remote_action.setEnabled(False)
-            self.direct_remote_action.setEnabled(False)
             self.stop_action.setEnabled(True)
             
             # Запускаем поток для чтения вывода
@@ -295,11 +208,16 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def read_stream(self, stream, name):
         """Читает поток (stdout или stderr) и отправляет данные в окно лога."""
         try:
-            for line in iter(stream.readline, ''):
+            # Установим небуферизованное чтение для потока
+            os.set_blocking(stream.fileno(), False)
+            
+            while self.process and self.process.poll() is None:
+                # Читаем доступные данные без блокировки
+                line = stream.readline()
                 if line:
                     # Добавляем префикс к строке в зависимости от потока
                     prefix = "[ERR] " if name == "STDERR" else ""
-                    # Отправляем строку в GUI поток - важно делать это немедленно
+                    # Отправляем строку в GUI поток
                     line_text = f"{prefix}{line.strip()}"
                     QtCore.QMetaObject.invokeMethod(
                         self.log_window, 
@@ -307,8 +225,21 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                         QtCore.Qt.QueuedConnection,
                         QtCore.Q_ARG(str, line_text)
                     )
-                    # Обеспечиваем небольшую задержку для обработки GUI
-                    QtCore.QThread.msleep(10)
+                else:
+                    # Если нет новых данных, даем процессору отдохнуть
+                    QtCore.QThread.msleep(50)
+            
+            # Вычитываем оставшиеся данные после завершения процесса
+            for line in stream:
+                if line:
+                    prefix = "[ERR] " if name == "STDERR" else ""
+                    line_text = f"{prefix}{line.strip()}"
+                    QtCore.QMetaObject.invokeMethod(
+                        self.log_window, 
+                        "append_text", 
+                        QtCore.Qt.QueuedConnection,
+                        QtCore.Q_ARG(str, line_text)
+                    )
         except Exception as e:
             QtCore.QMetaObject.invokeMethod(
                 self.log_window, 
@@ -321,7 +252,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def process_finished(self):
         self.running = False
         self.start_remote_action.setEnabled(True)
-        self.direct_remote_action.setEnabled(True)
         self.stop_action.setEnabled(False)
         self.log_window.append_text("Процесс завершен.")
     
@@ -329,17 +259,98 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         if self.process and self.running:
             try:
                 self.log_window.append_text("Останавливаю процесс...")
+                
+                # Получаем ID всех дочерних процессов перед завершением основного
+                try:
+                    # Находим все дочерние процессы
+                    child_pids = []
+                    parent_pid = self.process.pid
+                    ps_command = subprocess.run(
+                        ["pgrep", "-P", str(parent_pid)],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        universal_newlines=True
+                    )
+                    if ps_command.returncode == 0:
+                        child_pids = [int(pid) for pid in ps_command.stdout.strip().split()]
+                        self.log_window.append_text(f"Найдены дочерние процессы: {child_pids}")
+                except Exception as e:
+                    self.log_window.append_text(f"Ошибка при поиске дочерних процессов: {str(e)}")
+                
+                # Отправляем SIGTERM главному процессу и даем ему шанс корректно завершиться
                 os.kill(self.process.pid, signal.SIGTERM)
+                
+                # Ждем небольшое время для корректного завершения
+                max_wait = 3  # максимальное время ожидания в секундах
+                for _ in range(max_wait * 10):  # проверяем каждые 100 мс
+                    if self.process.poll() is not None:  # процесс завершился
+                        self.log_window.append_text(f"Процесс успешно завершен с кодом: {self.process.returncode}")
+                        break
+                    time.sleep(0.1)
+                
+                # Если процесс не завершился, принудительно завершаем его
+                if self.process.poll() is None:
+                    self.log_window.append_text("Процесс не завершился корректно, принудительное завершение...")
+                    os.kill(self.process.pid, signal.SIGKILL)
+                    self.log_window.append_text("Процесс принудительно завершен")
+                
+                # Проверяем и убиваем все дочерние процессы, если они остались
+                for pid in child_pids:
+                    try:
+                        # Проверяем, существует ли процесс
+                        os.kill(pid, 0)  # 0 - просто проверка наличия процесса
+                        # Если процесс существует, принудительно завершаем его
+                        self.log_window.append_text(f"Принудительно завершаем дочерний процесс {pid}")
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        # Процесс уже не существует
+                        pass
+                
                 # GUI обновляется в process_finished после завершения процесса
+                # Принудительно вызываем обработку завершения, если функция process_finished еще не сработала
+                if self.running:
+                    self.process_finished()
+                
             except Exception as e:
                 self.log_window.append_text(f"Ошибка при остановке: {str(e)}")
+                import traceback
+                self.log_window.append_text(traceback.format_exc())
     
     def show_log(self):
         self.log_window.show()
         self.log_window.raise_()
     
     def exit_app(self):
-        self.stop_whisper()  # Останавливаем процесс, если он запущен
+        self.log_window.append_text("Завершение приложения...")
+        
+        # Останавливаем процесс, если он запущен
+        self.stop_whisper()
+        
+        # Дополнительная проверка и завершение оставшихся процессов Python
+        try:
+            # Находим все процессы Python, связанные с нашим скриптом dictation.py
+            ps_command = subprocess.run(
+                ["pgrep", "-f", "dictation.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            if ps_command.returncode == 0:
+                leftover_pids = [int(pid) for pid in ps_command.stdout.strip().split()]
+                self.log_window.append_text(f"Найдены оставшиеся процессы dictation.py: {leftover_pids}")
+                
+                # Принудительно завершаем оставшиеся процессы
+                for pid in leftover_pids:
+                    try:
+                        if pid != os.getpid():  # Не убиваем наш собственный процесс
+                            self.log_window.append_text(f"Принудительно завершаем процесс {pid}")
+                            os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+        except Exception as e:
+            self.log_window.append_text(f"Ошибка при завершении оставшихся процессов: {str(e)}")
+        
+        # Завершаем приложение
         QtWidgets.QApplication.quit()
 
     def check_and_install_dependencies(self):
@@ -530,5 +541,8 @@ if __name__ == "__main__":
         QtGui.QIcon.fromTheme("audio-input-microphone"), 
         3000
     )
+    
+    # Автоматически запускаем службу распознавания после загрузки приложения
+    QtCore.QTimer.singleShot(1000, lambda: tray_icon.start_remote_whisper())
     
     sys.exit(app.exec_()) 
