@@ -36,10 +36,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         self.start_remote_action = self.menu.addAction("Запустить удаленный Whisper")
         self.start_remote_action.triggered.connect(self.start_remote_whisper)
         
-        self.start_local_action = self.menu.addAction("Запустить локальный Whisper")
-        self.start_local_action.triggered.connect(self.start_local_whisper)
-        
-        # Добавляем прямой запуск Python-скрипта (для отладки)
+        # Добавляем прямой запуск Python-скрипта
         self.direct_remote_action = self.menu.addAction("Прямой запуск (OpenAI)")
         self.direct_remote_action.triggered.connect(self.start_direct_remote)
         
@@ -70,10 +67,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def start_remote_whisper(self):
         if not self.running:
             self.start_whisper("run_dictation_remote.sh")
-    
-    def start_local_whisper(self):
-        if not self.running:
-            self.start_whisper("run_dictation_local.sh")
     
     def start_direct_remote(self):
         if not self.running:
@@ -127,25 +120,15 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             self.log_window.append_text("---------------------------")
             
             try:
+                # Важно: передаем ru как первый позиционный аргумент после remote
+                command = [venv_python, python_script, "remote", "ru"]
                 self.log_window.append_text(f"Используем Python из venv: {venv_python}")
-                self.log_window.append_text(f"Запускаем: {python_script} remote --no-type-using-clipboard")
+                self.log_window.append_text(f"Команда запуска: {' '.join(command)}")
                 
-                # Вместо буферизации потоков, запишем их в временные файлы для отладки
-                stdout_file = os.path.join(script_dir, "whisper_stdout.log")
-                stderr_file = os.path.join(script_dir, "whisper_stderr.log")
-                
-                # Открываем файлы для записи
-                stdout_fd = open(stdout_file, "w")
-                stderr_fd = open(stderr_file, "w")
-                
-                self.log_window.append_text(f"Лог stdout: {stdout_file}")
-                self.log_window.append_text(f"Лог stderr: {stderr_file}")
-                
-                # Добавляем временный отладочный вывод в stdout
                 self.process = subprocess.Popen(
-                    [venv_python, python_script, "remote", "--no-type-using-clipboard"], 
+                    command, 
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,  # Перехватываем также stderr
+                    stderr=subprocess.PIPE,
                     universal_newlines=True,
                     bufsize=1,
                     env=env,
@@ -155,7 +138,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 # Обновляем состояние GUI
                 self.running = True
                 self.start_remote_action.setEnabled(False)
-                self.start_local_action.setEnabled(False)
                 self.direct_remote_action.setEnabled(False)
                 self.stop_action.setEnabled(True)
                 
@@ -165,7 +147,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 self.output_reader.start()
                 
                 # Показываем уведомление
-                self.showMessage("Whisper Dictation", "Сервис распознавания речи запущен напрямую", QtGui.QIcon.fromTheme("audio-input-microphone"), 3000)
+                self.showMessage("Whisper Dictation", "Сервис распознавания речи запущен напрямую (русский язык)", QtGui.QIcon.fromTheme("audio-input-microphone"), 3000)
                 
             except Exception as e:
                 self.log_window.append_text(f"Ошибка запуска Python: {str(e)}")
@@ -198,13 +180,16 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             # Запускаем через bash для правильной обработки переменных окружения и shell-специфичных команд
             self.log_window.append_text(f"Выполняю bash скрипт: {script_path}")
             
-            # Сделаем скрипт исполняемым на всякий случай
-            os.chmod(script_path, 0o755)
+
+            
+            # Добавляем язык напрямую в аргументы скрипта
+            command = ["/bin/bash", script_path, "ru"]
+            self.log_window.append_text(f"Команда запуска: {' '.join(command)}")
             
             self.process = subprocess.Popen(
-                ["/bin/bash", script_path], 
+                command,
                 stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,  # Исправлено: теперь stderr отдельный поток
+                stderr=subprocess.PIPE,
                 universal_newlines=True,
                 bufsize=1,
                 env=env,
@@ -214,7 +199,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             # Обновляем состояние GUI
             self.running = True
             self.start_remote_action.setEnabled(False)
-            self.start_local_action.setEnabled(False)
             self.direct_remote_action.setEnabled(False)
             self.stop_action.setEnabled(True)
             
@@ -247,9 +231,20 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 stdout_thread.start()
                 stderr_thread.start()
                 
-                # Ждем завершения потоков
-                stdout_thread.join()
-                stderr_thread.join()
+                # Явно сообщаем пользователю, что ожидаем ввода
+                QtCore.QMetaObject.invokeMethod(
+                    self.log_window, 
+                    "append_text", 
+                    QtCore.Qt.QueuedConnection,
+                    QtCore.Q_ARG(str, "\n🎤 Процесс запущен. Нажмите и удерживайте Alt_R для записи речи.")
+                )
+                
+                # Отслеживаем поток выполнения не блокируя основной поток
+                monitor_thread = threading.Thread(target=self.monitor_process)
+                monitor_thread.daemon = True
+                monitor_thread.start()
+                
+                return
             else:
                 QtCore.QMetaObject.invokeMethod(
                     self.log_window, 
@@ -264,8 +259,23 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 QtCore.Qt.QueuedConnection,
                 QtCore.Q_ARG(str, f"ОШИБКА чтения вывода: {str(e)}")
             )
+            import traceback
+            QtCore.QMetaObject.invokeMethod(
+                self.log_window, 
+                "append_text", 
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(str, traceback.format_exc())
+            )
             
-        # Процесс завершился
+        # В случае ошибки, мы все равно ждем завершения процесса
+        QtCore.QMetaObject.invokeMethod(
+            self, 
+            "process_finished", 
+            QtCore.Qt.QueuedConnection
+        )
+            
+    def monitor_process(self):
+        """Отслеживает процесс и вызывает обновление GUI при его завершении."""
         if self.process:
             exit_code = self.process.wait()
             QtCore.QMetaObject.invokeMethod(
@@ -274,13 +284,13 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 QtCore.Qt.QueuedConnection,
                 QtCore.Q_ARG(str, f"Процесс завершился с кодом: {exit_code}")
             )
-        
-        # Обновляем GUI в главном потоке
-        QtCore.QMetaObject.invokeMethod(
-            self, 
-            "process_finished", 
-            QtCore.Qt.QueuedConnection
-        )
+            
+            # Обновляем GUI в главном потоке
+            QtCore.QMetaObject.invokeMethod(
+                self, 
+                "process_finished", 
+                QtCore.Qt.QueuedConnection
+            )
     
     def read_stream(self, stream, name):
         """Читает поток (stdout или stderr) и отправляет данные в окно лога."""
@@ -289,13 +299,16 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 if line:
                     # Добавляем префикс к строке в зависимости от потока
                     prefix = "[ERR] " if name == "STDERR" else ""
-                    # Отправляем строку в GUI поток
+                    # Отправляем строку в GUI поток - важно делать это немедленно
+                    line_text = f"{prefix}{line.strip()}"
                     QtCore.QMetaObject.invokeMethod(
                         self.log_window, 
                         "append_text", 
                         QtCore.Qt.QueuedConnection,
-                        QtCore.Q_ARG(str, f"{prefix}{line.strip()}")
+                        QtCore.Q_ARG(str, line_text)
                     )
+                    # Обеспечиваем небольшую задержку для обработки GUI
+                    QtCore.QThread.msleep(10)
         except Exception as e:
             QtCore.QMetaObject.invokeMethod(
                 self.log_window, 
@@ -308,7 +321,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def process_finished(self):
         self.running = False
         self.start_remote_action.setEnabled(True)
-        self.start_local_action.setEnabled(True)
         self.direct_remote_action.setEnabled(True)
         self.stop_action.setEnabled(False)
         self.log_window.append_text("Процесс завершен.")
