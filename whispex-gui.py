@@ -127,61 +127,29 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         
     def start_remote_whisper(self):
         if not self.running:
-            self.start_whisper("dictation.py")
+            self.start_whisper("whispex.py")
     
     def start_whisper(self, script_name):
-        self.log_window.append_text(f"Starting {script_name}...")
+        """
+        Start the Whispex whisper process.
+        """
+        script_path = os.path.join(self.script_dir, script_name)
         
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Configure environment for script execution
-        env = os.environ.copy()
-        
-        # Disable Python output buffering
-        env['PYTHONUNBUFFERED'] = '1'
+        if not os.path.exists(script_path):
+            self.log_window.append_text(f"Error: Script {script_path} not found")
+            return False
         
         try:
-            # Execute script through uv run
-            self.log_window.append_text(f"Executing script via uv: {script_name}")
+            # Start the whisper script in a separate process
+            subprocess.Popen([
+                "uv", "run", script_path
+            ], cwd=self.script_dir)
             
-            # Launch script using uv run @uv
-            command = ["uv", "run", "@uv", script_name]
-            
-            self.log_window.append_text(f"Launch command: {' '.join(command)}")
-            
-            self.process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                bufsize=1,
-                env=env,
-                cwd=script_dir  # Important! Run in project directory
-            )
-            
-            # Update GUI state
-            self.running = True
-            self.start_remote_action.setEnabled(False)
-            self.stop_action.setEnabled(True)
-            
-            # Start thread for reading output
-            self.output_reader = threading.Thread(target=self.read_output)
-            self.output_reader.daemon = True
-            self.output_reader.start()
-            
-            # Show notification
-            self.showMessage(
-                "Whispex", 
-                "Speech recognition service started", 
-                QtGui.QIcon(os.path.join(script_dir, "whispex.png")) if os.path.exists(os.path.join(script_dir, "whispex.png")) else QtGui.QIcon.fromTheme("audio-input-microphone"), 
-                3000
-            )
-            
+            self.log_window.append_text(f"Started {script_name}")
+            return True
         except Exception as e:
-            self.log_window.append_text(f"Launch error: {str(e)}")
-            # Print stack trace for debugging
-            import traceback
-            self.log_window.append_text(traceback.format_exc())
+            self.log_window.append_text(f"Error starting {script_name}: {e}")
+            return False
     
     def read_output(self):
         try:
@@ -382,25 +350,28 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         
         # Additional check and termination of remaining Python processes
         try:
-            # Find all Python processes related to our dictation.py script
-            ps_command = subprocess.run(
-                ["pgrep", "-f", "dictation.py"],
+            # Find all Python processes related to our whispex.py script
+            output = subprocess.run(
+                ["pgrep", "-f", "whispex.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True
             )
-            if ps_command.returncode == 0:
-                leftover_pids = [int(pid) for pid in ps_command.stdout.strip().split()]
-                self.log_window.append_text(f"Found remaining dictation.py processes: {leftover_pids}")
+            
+            if output.returncode == 0:
+                leftover_pids = output.stdout.strip().split()
+                self.log_window.append_text(f"Found remaining whispex.py processes: {leftover_pids}")
                 
-                # Forcefully terminate remaining processes
                 for pid in leftover_pids:
                     try:
-                        if pid != os.getpid():  # Don't kill our own process
-                            self.log_window.append_text(f"Forcefully terminating process {pid}")
-                            os.kill(pid, signal.SIGKILL)
-                    except OSError:
-                        pass
+                        os.kill(int(pid), signal.SIGTERM)
+                        self.log_window.append_text(f"Terminated process {pid}")
+                    except ProcessLookupError:
+                        self.log_window.append_text(f"Process {pid} already terminated")
+                    except Exception as e:
+                        self.log_window.append_text(f"Error terminating process {pid}: {e}")
+            else:
+                self.log_window.append_text("No Whispex processes found to clean up")
         except Exception as e:
             self.log_window.append_text(f"Error terminating remaining processes: {str(e)}")
         
@@ -567,6 +538,38 @@ print(json.dumps(sd.query_devices()))
                     self.start_remote_whisper()
             else:
                 log_message("❌ Failed to save settings")
+
+    def cleanup(self):
+        """
+        Clean up resources and terminate any running Whispex processes.
+        """
+        self.log_window.append_text("Cleaning up before exit...")
+        
+        try:
+            # Find all Python processes related to our whispex.py script
+            output = subprocess.run(
+                ["pgrep", "-f", "whispex.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            if output.returncode == 0:
+                leftover_pids = output.stdout.strip().split()
+                self.log_window.append_text(f"Found remaining whispex.py processes: {leftover_pids}")
+                
+                for pid in leftover_pids:
+                    try:
+                        os.kill(int(pid), signal.SIGTERM)
+                        self.log_window.append_text(f"Terminated process {pid}")
+                    except ProcessLookupError:
+                        self.log_window.append_text(f"Process {pid} already terminated")
+                    except Exception as e:
+                        self.log_window.append_text(f"Error terminating process {pid}: {e}")
+            else:
+                self.log_window.append_text("No Whispex processes found to clean up")
+        except Exception as e:
+            self.log_window.append_text(f"Error terminating remaining processes: {str(e)}")
 
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, settings, parent=None):

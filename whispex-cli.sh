@@ -28,12 +28,12 @@ if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
 fi
 
 # Direct execution of dictation.py in blocking mode without any arguments
-echo "Starting dictation.py..."
+echo "Starting whispex.py..."
 echo "Attempting to load settings from configuration file..."
 
 # Clear VIRTUAL_ENV to avoid warnings about environment mismatch
 unset VIRTUAL_ENV
 
 # Run dictation.py with proper path and uv context
-SCRIPT_PATH="${script_dir}/dictation.py"
+SCRIPT_PATH="${script_dir}/whispex.py"
 exec uv run "${SCRIPT_PATH}"

@@ -339,6 +339,49 @@ def on_release(key):
         app_state.rec_key_pressed = False
         app_state.time_last_used = time.time()
 
+def terminate_process_tree(pid, timeout=3):
+    """
+    Terminates a process and all its children processes.
+    
+    Args:
+        pid (int): Process ID to terminate
+        timeout (int, optional): Seconds to wait for graceful termination before force kill
+    """
+    try:
+        # Get only direct children of current process
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        
+        # Log children to terminate
+        if children:
+            logger.info(f"Terminating {len(children)} child processes...")
+            
+            # Send SIGTERM to all children first
+            for child in children:
+                try:
+                    if child.is_running():
+                        logger.info(f"Sending SIGTERM to child process {child.pid}...")
+                        child.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            
+            # Wait for children to terminate and kill if necessary
+            gone, alive = psutil.wait_procs(children, timeout=timeout)
+            for child in alive:
+                try:
+                    logger.warning(f"Force killing child process {child.pid}...")
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        
+    except psutil.NoSuchProcess:
+        logger.info(f"Process {pid} no longer exists")
+    except Exception as e:
+        logger.error(f"Error terminating process tree: {e}")
+
+# Flag to prevent multiple signal handler executions
+signal_handler_running = False
+
 def signal_handler(sig, frame):
     """
     Handle termination signals with proper cleanup.
@@ -347,13 +390,20 @@ def signal_handler(sig, frame):
         sig: Signal number
         frame: Current stack frame
     """
+    global signal_handler_running
+    
+    # Prevent multiple executions of signal handler
+    if signal_handler_running:
+        return
+    
+    signal_handler_running = True
     logger.info(f"Received signal {sig}, proper termination...")
     
     # First stop any recording in progress
     app_state.rec_key_pressed = False
     
-    # Close keyboard listener
-    if 'listener' in globals() and listener:
+    # Close keyboard listener if it exists
+    if 'listener' in globals():
         try:
             listener.stop()
             logger.info("Keyboard listener stopped")
@@ -369,111 +419,16 @@ def signal_handler(sig, frame):
         except Exception as e:
             logger.error(f"Error closing audio stream: {e}")
     
-    # Terminate any child processes related to this application
-    current_pid = os.getpid()
-    logger.info(f"Cleaning up processes (PID: {current_pid})...")
-    
-    # Find and terminate processes related to this application
+    # Terminate only our direct child processes, don't look for other instances
     try:
-        # Clean up our own process tree first (just children)
+        current_pid = os.getpid()
+        logger.info(f"Cleaning up direct child processes of {current_pid}...")
         terminate_process_tree(current_pid)
-        
-        # Look for other instances of dictation.py that might be orphaned
-        # but don't include our own process
-        output = subprocess.run(
-            ["pgrep", "-f", "dictation.py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
-        if output.returncode == 0:
-            for pid_str in output.stdout.strip().split():
-                pid = int(pid_str)
-                if pid != current_pid:  # Don't terminate ourselves again
-                    logger.info(f"Found other dictation.py process: {pid}, terminating...")
-                    terminate_process_tree(pid)
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
     
     logger.info("Cleanup completed, exiting...")
     sys.exit(0)
-
-def terminate_process_tree(pid, timeout=3):
-    """
-    Terminates a process and all its children processes.
-    
-    Args:
-        pid (int): Process ID to terminate
-        timeout (int, optional): Seconds to wait for graceful termination before force kill
-    """
-    try:
-        # Skip if trying to terminate our own process, just kill the children
-        # This avoids recursion when called from signal_handler
-        current_pid = os.getpid()
-        if pid == current_pid:
-            parent = psutil.Process(pid)
-            children = parent.children(recursive=True)
-            
-            # Log children to terminate
-            if children:
-                logger.info(f"Terminating {len(children)} child processes...")
-                for child in children:
-                    try:
-                        if child.is_running():
-                            logger.info(f"Sending SIGTERM to child process {child.pid}...")
-                            child.terminate()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                
-                # Wait for children to terminate and kill if necessary
-                gone, alive = psutil.wait_procs(children, timeout=timeout)
-                for child in alive:
-                    try:
-                        logger.warning(f"Force killing child process {child.pid}...")
-                        child.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-            return
-        
-        # For other processes, terminate both parent and children
-        parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
-        
-        # Send SIGTERM to parent
-        logger.info(f"Sending SIGTERM to process {pid}...")
-        parent.terminate()
-        
-        # Wait for parent to terminate
-        gone, alive = psutil.wait_procs([parent], timeout=timeout)
-        if parent in alive:
-            # If still alive, force kill
-            logger.warning(f"Process {pid} did not terminate gracefully, force killing...")
-            parent.kill()
-        else:
-            logger.info(f"Process {pid} terminated gracefully")
-        
-        # Terminate any remaining children
-        if children:
-            logger.info(f"Terminating {len(children)} child processes...")
-            for child in children:
-                try:
-                    if child.is_running():
-                        child.terminate()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            
-            # Wait for children to terminate and kill if necessary
-            gone, alive = psutil.wait_procs(children, timeout=timeout)
-            for child in alive:
-                try:
-                    logger.warning(f"Force killing child process {child.pid}...")
-                    child.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-    except psutil.NoSuchProcess:
-        logger.info(f"Process {pid} no longer exists")
-    except Exception as e:
-        logger.error(f"Error terminating process tree: {e}")
 
 def evaluate_key_string(key_str):
     """

@@ -1,10 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=Whispex
-GenericName=Speech Recognition
-Comment=OpenAI Whisper Speech Recognition Service
-Exec=/home/arezvov/projects/ais/whispex/whispex-tray.py
+Comment=Voice-to-text dictation with OpenAI Whisper
+Exec=/home/arezvov/projects/ais/whispex/whispex-gui.py
 Icon=/home/arezvov/projects/ais/whispex/whispex.png
 Terminal=false
-Categories=Audio;Utility;AudioVideo;
-StartupNotify=true
+Categories=Utility;Accessibility;

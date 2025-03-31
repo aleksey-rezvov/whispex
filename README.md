@@ -53,7 +53,13 @@ api_key = "your-api-key-here"
 ## Usage
 
 ```bash
-python dictation.py [language] [options]
+python whispex.py [options]
+```
+
+Or use the GUI application:
+
+```
+python whispex-gui.py
 ```
 
 ### Options
