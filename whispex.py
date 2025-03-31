@@ -18,7 +18,9 @@ import pyperclip
 import sounddevice as sd
 import soundfile
 from openai import OpenAI
-import tomli
+
+# Import settings manager
+from settings import SettingsManager
 
 # Setup logging
 logging.basicConfig(
@@ -30,12 +32,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Module level settings container
-settings = {
-    'whisper': {},
-    'general': {},
-    'openai': {}
-}
+# Initialize settings manager
+settings_manager = SettingsManager()
 
 # Application state container with strict typing
 @dataclass
@@ -60,8 +58,8 @@ def main():
     signal.signal(signal.SIGHUP, signal_handler)
     
     # Get auto-off time from config
-    auto_off_time = settings['general'].get("auto_off_time")
-    rec_key = settings['general']['rec_key_obj']
+    auto_off_time = settings_manager.get("general", "auto_off_time")
+    rec_key = settings_manager.get("general", "rec_key_obj")
     
     # Start keyboard listener
     with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
@@ -86,107 +84,32 @@ def initialize_settings():
     Initialize all application settings from configuration.
     Updates the module level settings dictionary.
     """
-    # Load configuration
-    config = load_config()
+    # Settings are already loaded in the settings_manager
     logger.info("Application started with settings from configuration file")
     
-    # Extract settings, assuming all required settings are present
-    settings['whisper'] = config['whisper']
-    settings['general'] = config['general']
-    settings['openai'] = config['openai']
-    
-    # Initialize key and other values
+    # Initialize keyboard controller
     initialize_keyboard()
     
     # Display settings information
     log_settings()
-
-def load_config():
-    """
-    Load configuration from TOML file and process settings.
-    Handles environment variables for sensitive data like API keys.
-    
-    Returns:
-        dict: Configuration settings
-    """
-    config_path = ensure_config_path()
-    logger.info(f"Loading configuration from: {config_path}")
-    
-    try:
-        with open(config_path, "rb") as f:
-            config = tomli.load(f)
-            
-        # Handle OpenAI API key from environment if not in config
-        if not config.get("openai", {}).get("api_key"):
-            env_api_key = os.environ.get("OPENAI_API_KEY")
-            if env_api_key:
-                if "openai" not in config:
-                    config["openai"] = {}
-                config["openai"]["api_key"] = env_api_key
-                logger.info("Using OpenAI API key from environment variables")
-            else:
-                logger.error("OpenAI API key is not specified either in the configuration or in OPENAI_API_KEY environment variable")
-                logger.error("Working with OpenAI API is not possible without a valid key")
-                logger.error("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
-                sys.exit(1)
-        
-        return config
-    except Exception as e:
-        logger.error(f"Error reading configuration: {e}")
-        sys.exit(1)
-
-def ensure_config_path():
-    """
-    Find and return the path to configuration file.
-    If user config doesn't exist, copies the default config to user location.
-    
-    Returns:
-        Path: Path to the configuration file
-    """
-    # Path to user config
-    user_config_dir = Path.home() / ".config" / "whispex"
-    user_config_path = user_config_dir / "config.toml"
-    
-    # Path to default config in application directory
-    script_dir = Path(__file__).parent
-    default_config_path = script_dir / "default_config.toml"
-    
-    # Check if default config exists
-    if not default_config_path.exists():
-        logger.error(f"Default configuration file not found at {default_config_path}")
-        sys.exit(1)
-        
-    # If user config doesn't exist, create directory and copy default config
-    if not user_config_path.exists():
-        try:
-            # Create config directory if it doesn't exist
-            user_config_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Copy default config to user location
-            shutil.copy2(default_config_path, user_config_path)
-            logger.info(f"Created user configuration at {user_config_path}")
-        except Exception as e:
-            logger.error(f"Failed to create user configuration: {e}")
-            logger.info(f"Using default configuration from {default_config_path}")
-            return default_config_path
-    
-    return user_config_path
 
 def initialize_keyboard():
     """Initialize keyboard controller and keyboard shortcut key."""
     app_state.controller = pynput.keyboard.Controller()
     
     # Get recording key
-    key_str = settings['general']['rec_key']
-    settings['general']['rec_key_obj'] = evaluate_key_string(key_str)
+    key_str = settings_manager.get("general", "rec_key")
+    key_obj = evaluate_key_string(key_str)
+    # Store the key object in settings for convenience
+    settings_manager.set("general", "rec_key_obj", key_obj)
 
 def log_settings():
     """Log information about current settings."""
-    logger.info(f"Language: {settings['general']['language']}")
-    logger.info(f"Model temperature: {settings['whisper']['temperature']}")
-    logger.info(f"Recording key: {settings['general']['rec_key_obj']}")
-    logger.info(f"Input method: {settings['general']['input_method']}")
-    logger.info(f"Prompt length: {len(settings['whisper']['prompt'])}")
+    logger.info(f"Language: {settings_manager.get('general', 'language')}")
+    logger.info(f"Model temperature: {settings_manager.get('whisper', 'temperature')}")
+    logger.info(f"Recording key: {settings_manager.get('general', 'rec_key_obj')}")
+    logger.info(f"Input method: {settings_manager.get('general', 'input_method')}")
+    logger.info(f"Prompt length: {len(settings_manager.get('whisper', 'prompt', ''))}")
 
 def record_and_process():
     """
@@ -200,8 +123,8 @@ def record_and_process():
             logger.warning(f"Audio status: {status}")
         audio_chunks.append(indata.copy())
 
-    recording_samplerate = settings['whisper']['recording_sample_rate']
-    whisper_samplerate = settings['whisper']['sample_rate']
+    recording_samplerate = settings_manager.get("whisper", "recording_sample_rate")
+    whisper_samplerate = settings_manager.get("whisper", "sample_rate")
     
     app_state.stream = sd.InputStream(
         samplerate=recording_samplerate,
@@ -249,19 +172,19 @@ def get_text(audio, context=None):
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         tmp_audio_filename = temp_file.name
     
-    whisper_samplerate = settings['whisper']['sample_rate']
+    whisper_samplerate = settings_manager.get("whisper", "sample_rate")
     soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
     
-    language = settings['general']['language']
-    temperature = settings['whisper']['temperature']
-    prompt_text = settings['whisper']['prompt']
+    language = settings_manager.get("general", "language")
+    temperature = settings_manager.get("whisper", "temperature")
+    prompt_text = settings_manager.get("whisper", "prompt")
     actual_prompt = context or prompt_text
     
     logger.info(f"OpenAI request: lang={language}, temp={temperature}, prompt_length={len(actual_prompt)}")
     
     try:
         # Create OpenAI client with API key
-        client = OpenAI(api_key=settings['openai']['api_key'])
+        client = OpenAI(api_key=settings_manager.get("openai", "api_key"))
         
         api_response = client.audio.transcriptions.create(
             model="whisper-1",
@@ -287,10 +210,10 @@ def type_text(text):
         text (str): Text to type
     """
     # Skip if typing is disabled in config
-    if settings['general'].get('no_type', False):
+    if settings_manager.get("general", "no_type", False):
         return
     
-    input_method = settings['general']['input_method']
+    input_method = settings_manager.get("general", "input_method")
     
     if input_method == "clipboard_ctrl_v":
         pyperclip.copy(text)
@@ -319,7 +242,7 @@ def on_press(key):
     Args:
         key: The key that was pressed
     """
-    rec_key = settings['general']['rec_key_obj']
+    rec_key = settings_manager.get("general", "rec_key_obj")
     if key == rec_key:
         app_state.rec_key_pressed = True
 
@@ -334,7 +257,7 @@ def on_release(key):
     Args:
         key: The key that was released
     """
-    rec_key = settings['general']['rec_key_obj']
+    rec_key = settings_manager.get("general", "rec_key_obj")
     if key == rec_key:
         app_state.rec_key_pressed = False
         app_state.time_last_used = time.time()
