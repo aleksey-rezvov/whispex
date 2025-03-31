@@ -1,4 +1,3 @@
-import argparse
 import subprocess
 import threading
 import time
@@ -11,6 +10,8 @@ import logging
 import shutil
 from pathlib import Path
 import importlib
+from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 import pynput
@@ -37,11 +38,16 @@ settings = {
     'openai': {}
 }
 
-# Global state variables
-rec_key_pressed = False
-time_last_used = time.time()
-stream = None  # Global audio stream variable
-controller = None  # Keyboard controller
+# Application state container with strict typing
+@dataclass
+class AppState:
+    rec_key_pressed: bool = False
+    time_last_used: float = field(default_factory=time.time)
+    stream: Optional[sd.InputStream] = None  # Audio stream
+    controller: Optional[pynput.keyboard.Controller] = None  # Keyboard controller
+
+# Create a singleton instance
+app_state = AppState()
 
 def main():
     """Main function that runs the application."""
@@ -62,7 +68,7 @@ def main():
         logger.info(f"Press {rec_key} to start recording")
         try:
             while listener.is_alive():
-                if auto_off_time and auto_off_time > 0 and time.time() - time_last_used > auto_off_time:
+                if auto_off_time and auto_off_time > 0 and time.time() - app_state.time_last_used > auto_off_time:
                     logger.info("Auto off timeout reached")
                     break
                 time.sleep(1)
@@ -167,8 +173,7 @@ def ensure_config_path():
 
 def initialize_keyboard():
     """Initialize keyboard controller and keyboard shortcut key."""
-    global controller
-    controller = pynput.keyboard.Controller()
+    app_state.controller = pynput.keyboard.Controller()
     
     # Get recording key
     key_str = settings['general']['rec_key']
@@ -187,7 +192,6 @@ def record_and_process():
     Record audio while the key is pressed and process it for transcription.
     """
     # Recording and processing audio
-    global stream
     audio_chunks = []
 
     def audio_callback(indata, frames, time, status):
@@ -198,18 +202,18 @@ def record_and_process():
     recording_samplerate = settings['whisper']['recording_sample_rate']
     whisper_samplerate = settings['whisper']['sample_rate']
     
-    stream = sd.InputStream(
+    app_state.stream = sd.InputStream(
         samplerate=recording_samplerate,
         channels=1,
         blocksize=256,
         callback=audio_callback,
     )
-    stream.start()
-    while rec_key_pressed:
+    app_state.stream.start()
+    while app_state.rec_key_pressed:
         time.sleep(0.005)
-    stream.stop()
-    stream.close()
-    stream = None
+    app_state.stream.stop()
+    app_state.stream.close()
+    app_state.stream = None
     recorded_audio = np.concatenate(audio_chunks)[:, 0]
 
     # Check recording duration
@@ -289,23 +293,23 @@ def type_text(text):
     
     if input_method == "clipboard_ctrl_v":
         pyperclip.copy(text)
-        controller.press(pynput.keyboard.Key.ctrl_l)
-        controller.press("v")
-        controller.release("v")
-        controller.release(pynput.keyboard.Key.ctrl_l)
+        app_state.controller.press(pynput.keyboard.Key.ctrl_l)
+        app_state.controller.press("v")
+        app_state.controller.release("v")
+        app_state.controller.release(pynput.keyboard.Key.ctrl_l)
     elif input_method == "clipboard_ctrl_shift_v":
         pyperclip.copy(text)
-        controller.press(pynput.keyboard.Key.ctrl_l)
-        controller.press(pynput.keyboard.Key.shift_l)
-        controller.press("v")
-        controller.release("v")
-        controller.release(pynput.keyboard.Key.shift_l)
-        controller.release(pynput.keyboard.Key.ctrl_l)
+        app_state.controller.press(pynput.keyboard.Key.ctrl_l)
+        app_state.controller.press(pynput.keyboard.Key.shift_l)
+        app_state.controller.press("v")
+        app_state.controller.release("v")
+        app_state.controller.release(pynput.keyboard.Key.shift_l)
+        app_state.controller.release(pynput.keyboard.Key.ctrl_l)
     elif input_method == "direct":
-        controller.type(text)
+        app_state.controller.type(text)
     else:
         logger.warning(f"Unknown input method: {input_method}. Using direct input.")
-        controller.type(text)
+        app_state.controller.type(text)
 
 def on_press(key):
     """
@@ -314,10 +318,9 @@ def on_press(key):
     Args:
         key: The key that was pressed
     """
-    global rec_key_pressed
     rec_key = settings['general']['rec_key_obj']
     if key == rec_key:
-        rec_key_pressed = True
+        app_state.rec_key_pressed = True
 
         # start recording in a new thread
         t = threading.Thread(target=record_and_process)
@@ -330,11 +333,10 @@ def on_release(key):
     Args:
         key: The key that was released
     """
-    global rec_key_pressed, time_last_used
     rec_key = settings['general']['rec_key_obj']
     if key == rec_key:
-        rec_key_pressed = False
-        time_last_used = time.time()
+        app_state.rec_key_pressed = False
+        app_state.time_last_used = time.time()
 
 def signal_handler(sig, frame):
     """
@@ -347,8 +349,7 @@ def signal_handler(sig, frame):
     logger.info(f"Received signal {sig}, proper termination...")
     
     # First stop any recording in progress
-    global rec_key_pressed
-    rec_key_pressed = False
+    app_state.rec_key_pressed = False
     
     # Close keyboard listener
     if 'listener' in globals() and listener:
@@ -359,10 +360,10 @@ def signal_handler(sig, frame):
             logger.error(f"Error stopping keyboard listener: {e}")
     
     # Close audio devices if they are open
-    if 'stream' in globals() and stream:
+    if app_state.stream:
         try:
-            stream.stop()
-            stream.close()
+            app_state.stream.stop()
+            app_state.stream.close()
             logger.info("Audio stream closed")
         except Exception as e:
             logger.error(f"Error closing audio stream: {e}")

@@ -31,6 +31,9 @@ fi
 echo "Starting dictation.py..."
 echo "All settings are loaded from the configuration file."
 
+# Clear VIRTUAL_ENV to avoid warnings about environment mismatch
+unset VIRTUAL_ENV
+
 # Run dictation.py with proper path and uv context
 SCRIPT_PATH="${script_dir}/dictation.py"
 exec uv run "${SCRIPT_PATH}"
