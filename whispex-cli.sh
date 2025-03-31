@@ -2,7 +2,6 @@
 
 script_path="$(realpath "$0")"
 script_dir="$(dirname "$script_path")"
-cd $script_dir
 
 # Disable Python buffering
 export PYTHONUNBUFFERED=1
@@ -34,4 +33,4 @@ echo "All settings are loaded from the configuration file."
 
 # Run dictation.py with proper path and uv context
 SCRIPT_PATH="${script_dir}/dictation.py"
-exec uv run --python-path "${SCRIPT_PATH}"
+exec uv run "${SCRIPT_PATH}"
