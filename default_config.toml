@@ -3,15 +3,22 @@
 [general]
 # Language code for transcription (e.g. 'ru', 'en')
 language = "en"
-# Key used for push-to-talk recording
-# Supported special keys: alt_r, alt_l, ctrl_r, ctrl_l
-rec_key = "alt_r"
+# Key used for push-to-talk recording (Python expression)
+rec_key = "pynput.keyboard.Key.alt_r"
 # Input method: "clipboard_ctrl_v", "clipboard_ctrl_shift_v", or "direct"
 input_method = "clipboard_ctrl_shift_v"
+# Don't type transcribed text if set to true
+no_type = false
+# Automatically exit after N seconds of inactivity (set to 0 to disable)
+auto_off_time = 0
 
 [whisper]
 # Temperature parameter for model (0.0 to 1.0)
 temperature = 0.2
+# Whisper sampling rate
+sample_rate = 16000
+# Recording sampling rate (should be a multiple of sample_rate)
+recording_sample_rate = 48000
 # Prompt for Whisper model to improve transcription accuracy
 prompt = """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
 - Software development and programming

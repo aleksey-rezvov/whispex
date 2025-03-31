@@ -6,7 +6,10 @@ import signal
 import sys
 import tempfile
 import os
+import psutil
+import logging
 from pathlib import Path
+import importlib
 
 import numpy as np
 import pynput
@@ -16,8 +19,24 @@ import soundfile
 from openai import OpenAI
 import tomli
 
-# Function to get the configuration file path
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
 def get_config_path():
+    """
+    Find and return the path to configuration file.
+    Tries user config first, then falls back to default config.
+    
+    Returns:
+        Path: Path to the configuration file
+    """
     # Path to user config
     user_config_dir = Path.home() / ".config" / "whispex"
     user_config_path = user_config_dir / "config.toml"
@@ -34,24 +53,41 @@ def get_config_path():
         if default_config_path.exists():
             return default_config_path
         else:
-            print(f"Error: Configuration file not found. Neither {user_config_path} nor {default_config_path} exist.")
+            logger.error(f"Configuration file not found. Neither {user_config_path} nor {default_config_path} exist.")
             sys.exit(1)
 
-# Loading configuration
 def load_config():
+    """
+    Load configuration from TOML file and process settings.
+    Handles environment variables for sensitive data like API keys.
+    
+    Returns:
+        dict: Configuration settings
+    """
     config_path = get_config_path()
-    print(f"Loading configuration from: {config_path}")
+    logger.info(f"Loading configuration from: {config_path}")
     
     try:
         with open(config_path, "rb") as f:
-            return tomli.load(f)
+            config = tomli.load(f)
+            
+        # Handle OpenAI API key from environment if not in config
+        if not config.get("openai", {}).get("api_key"):
+            env_api_key = os.environ.get("OPENAI_API_KEY")
+            if env_api_key:
+                if "openai" not in config:
+                    config["openai"] = {}
+                config["openai"]["api_key"] = env_api_key
+                logger.info("Using OpenAI API key from environment variables")
+            else:
+                logger.warning("OpenAI API key is not specified either in the configuration or in OPENAI_API_KEY environment variable")
+                logger.warning("Working with OpenAI API will not be possible without a valid key")
+                logger.warning("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
+        
+        return config
     except Exception as e:
-        print(f"Error reading configuration: {e}")
+        logger.error(f"Error reading configuration: {e}")
         sys.exit(1)
-
-# Load configuration
-config = load_config()
-print("Settings from the configuration file can be overridden by command line parameters.")
 
 # Override standard print for automatic buffer flushing
 original_print = print
@@ -59,99 +95,90 @@ def print(*args, **kwargs):
     kwargs['flush'] = True
     return original_print(*args, **kwargs)
 
-# Development prompt to improve transcription for programming and development topics
-DEFAULT_PROMPT = """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
-- Software development and programming
-- System administration and DevOps
-- Software architecture and design patterns
-- Project management and requirements engineering
-- Databases and data structures
-- Algorithms and computational complexity
-- Cloud technologies and infrastructure
+# Load configuration
+config = load_config()
+logger.info("Application started with settings from configuration file")
 
-When uncertain about a word or phrase, prioritize technical meaning over common usage. Preserve English technical terms even within Russian sentences. The speaker may switch between Russian and English mid-sentence when discussing technical concepts."""
+# Extract settings with defaults from config
+whisper_settings = config.get("whisper", {})
+general_settings = config.get("general", {})
 
-whisper_samplerate = 16000  # sampling rate that whisper uses
-recording_samplerate = 48000  # multiple of whisper_samplerate, widely supported
+# Get audio settings 
+whisper_samplerate = whisper_settings.get("sample_rate", 16000)  # sampling rate that whisper uses
+recording_samplerate = whisper_settings.get("recording_sample_rate", 48000)  # multiple of whisper_samplerate, widely supported
 
-# Convert key string to Key object
-def get_key_from_string(key_str):
-    if key_str == "alt_r":
-        return pynput.keyboard.Key.alt_r
-    elif key_str == "alt_l":
-        return pynput.keyboard.Key.alt_l
-    elif key_str == "ctrl_r":
-        return pynput.keyboard.Key.ctrl_r
-    elif key_str == "ctrl_l":
-        return pynput.keyboard.Key.ctrl_l
-    # Add other special keys as needed
-    else:
-        return key_str  # For regular keys
+def evaluate_key_string(key_str):
+    """
+    Evaluate a Python expression to get a keyboard key.
+    Allows configuration file to specify keys like 'pynput.keyboard.Key.alt_r'
+    
+    Args:
+        key_str (str): Python expression representing a key
+        
+    Returns:
+        object: Key object or string
+    """
+    try:
+        # Try to evaluate the string as Python code
+        # First import necessary modules
+        keyboard_module = importlib.import_module('pynput.keyboard')
+        
+        # Create a safe namespace with only allowed modules
+        namespace = {
+            'pynput': pynput,
+            'keyboard': keyboard_module
+        }
+        
+        # If the string doesn't contain any Python expressions, return as is
+        if not any(marker in key_str for marker in [".", "(", ")", "pynput"]):
+            return key_str
+            
+        # Evaluate the expression
+        return eval(key_str, namespace)
+    except Exception as e:
+        logger.warning(f"Could not evaluate key string '{key_str}': {e}")
+        return key_str  # Return original string if evaluation fails
 
-# Settings from config with default values
-rec_key = get_key_from_string(config.get("general", {}).get("rec_key", "alt_r"))
-default_language = config.get("general", {}).get("language", "en")
-default_temperature = config.get("whisper", {}).get("temperature", 0.2)
+# Get settings from config
+rec_key = evaluate_key_string(general_settings.get("rec_key", "pynput.keyboard.Key.alt_r"))
+language = general_settings.get("language", "en")
+temperature = whisper_settings.get("temperature", 0.2)
 openai_api_key = config.get("openai", {}).get("api_key", None)
-input_method = config.get("general", {}).get("input_method", "clipboard_ctrl_shift_v")
-prompt_text = config.get("whisper", {}).get("prompt", DEFAULT_PROMPT)
+input_method = general_settings.get("input_method", "clipboard_ctrl_shift_v")
+prompt_text = whisper_settings.get("prompt", "")
 
+# Initialize the keyboard controller
 controller = pynput.keyboard.Controller()
-
-# Parse arguments
-parser = argparse.ArgumentParser()
-parser.add_argument("language", nargs="?", default=default_language, help="Language code for transcription (e.g. 'ru', 'en')")
-parser.add_argument("--no-type", action="store_true", help="Don't type anything")
-parser.add_argument("--on-callback", type=str, default=None, help="Command to run after initialization")
-parser.add_argument("--auto-off-time", type=int, default=None, help="Automatically turn off after N seconds of inactivity")
-parser.add_argument("--temperature", type=float, default=default_temperature, help=f"Temperature parameter for Whisper model (default: {default_temperature})")
-parser.add_argument("--prompt", type=str, default=None, help="Custom prompt for Whisper model (use @filepath to load from file)")
-args = parser.parse_args()
-
-# Check for API key
-if not openai_api_key and not os.environ.get("OPENAI_API_KEY"):
-    print("WARNING: OpenAI API key is not specified either in the configuration or in the OPENAI_API_KEY environment variable")
-    print("Working with OpenAI API will not be possible without a valid key.")
-    print("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
 
 # Initialize OpenAI client
 client = OpenAI(api_key=openai_api_key)
 
-# Check if prompt is provided via file
-prompt_arg = args.prompt
-if prompt_arg and prompt_arg.startswith('@'):
-    prompt_file = prompt_arg[1:]  # Remove @ at the beginning
-    try:
-        with open(prompt_file, 'r', encoding='utf-8') as f:
-            args.prompt = f.read()
-        print(f"Prompt loaded from file: {prompt_file}")
-    except Exception as e:
-        print(f"Error loading prompt from file {prompt_file}: {str(e)}")
-        args.prompt = None
-
-# Set the prompt from command line or use default
-DEV_PROMPT = args.prompt if args.prompt else prompt_text
-
-if args.on_callback is not None:
-    subprocess.run(args.on_callback, shell=True)
-
-
 def get_text(audio, context=None):
+    """
+    Send audio to OpenAI Whisper API for transcription.
+    
+    Args:
+        audio (numpy.ndarray): Audio data to transcribe
+        context (str, optional): Prompt context for the model
+        
+    Returns:
+        str: Transcribed text
+    """
     # Create a temporary file in /tmp directory with the correct extension
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         tmp_audio_filename = temp_file.name
     
     soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
-    actual_prompt = context or DEV_PROMPT
-    print(f"🌐 OpenAI request: lang={args.language}, temp={args.temperature}, prompt=\"{actual_prompt[:30]}...\"")
+    actual_prompt = context or prompt_text
+    logger.info(f"OpenAI request: lang={language}, temp={temperature}, prompt_length={len(actual_prompt)}")
     
     try:
         api_response = client.audio.transcriptions.create(
             model="whisper-1",
             file=open(tmp_audio_filename, "rb"),
-            language=args.language,
+            language=language,
             prompt=actual_prompt,
-            temperature=args.temperature
+            temperature=temperature
         )
         result_text = api_response.text
     finally:
@@ -164,7 +191,14 @@ def get_text(audio, context=None):
 
 
 def type_text(text):
-    if args.no_type:
+    """
+    Type text using the configured input method.
+    
+    Args:
+        text (str): Text to type
+    """
+    # Skip if typing is disabled in config
+    if general_settings.get("no_type", False):
         return
     
     if input_method == "clipboard_ctrl_v":
@@ -184,7 +218,7 @@ def type_text(text):
     elif input_method == "direct":
         controller.type(text)
     else:
-        print(f"Unknown input method: {input_method}. Using direct input.")
+        logger.warning(f"Unknown input method: {input_method}. Using direct input.")
         controller.type(text)
 
 
@@ -195,13 +229,16 @@ time_last_used = time.time()
 stream = None
 
 def record_and_process():
+    """
+    Record audio while the key is pressed and process it for transcription.
+    """
     # Recording and processing audio
     global stream
     audio_chunks = []
 
     def audio_callback(indata, frames, time, status):
         if status:
-            print("WARNING:", status)
+            logger.warning(f"Audio status: {status}")
         audio_chunks.append(indata.copy())
 
     stream = sd.InputStream(
@@ -221,17 +258,15 @@ def record_and_process():
     # Check recording duration
     duration = len(recorded_audio) / recording_samplerate
     if duration <= 0.1:
-        print("Recording too short, skipping")
+        logger.info("Recording too short, skipping")
         return
 
     # Downsampling
-    recorded_audio = recorded_audio[::3]
-
-    context = None  # Use dev-prompt by default
+    recorded_audio = recorded_audio[::int(recording_samplerate/whisper_samplerate)]
 
     # Transcription
-    text = get_text(recorded_audio, context)
-    print(text)
+    text = get_text(recorded_audio)
+    logger.info(f"Transcribed: {text}")
 
     # Input text
     text = text + " "
@@ -239,6 +274,12 @@ def record_and_process():
 
 
 def on_press(key):
+    """
+    Handle key press events, start recording when activation key is pressed.
+    
+    Args:
+        key: The key that was pressed
+    """
     global rec_key_pressed
     if key == rec_key:
         rec_key_pressed = True
@@ -249,6 +290,12 @@ def on_press(key):
 
 
 def on_release(key):
+    """
+    Handle key release events, stop recording when activation key is released.
+    
+    Args:
+        key: The key that was released
+    """
     global rec_key_pressed, time_last_used
     if key == rec_key:
         rec_key_pressed = False
@@ -256,46 +303,142 @@ def on_release(key):
 
 
 # Display settings information
-print(f"Language: {args.language}")
-print(f"Model temperature: {args.temperature}")
-print(f"Recording key: {rec_key}")
-print(f"Input method: {input_method}")
-print(f"Prompt: {DEV_PROMPT[:50]}...")
+logger.info(f"Language: {language}")
+logger.info(f"Model temperature: {temperature}")
+logger.info(f"Recording key: {rec_key}")
+logger.info(f"Input method: {input_method}")
+logger.info(f"Prompt length: {len(prompt_text) if prompt_text else 0}")
 
-# Add signal handler for proper termination
+# Function to kill a process and all its children
+def terminate_process_tree(pid, timeout=3):
+    """
+    Terminates a process and all its children processes.
+    
+    Args:
+        pid (int): Process ID to terminate
+        timeout (int, optional): Seconds to wait for graceful termination before force kill
+    """
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        
+        # Send SIGTERM to parent
+        logger.info(f"Sending SIGTERM to process {pid}...")
+        parent.terminate()
+        
+        # Wait for parent to terminate
+        gone, alive = psutil.wait_procs([parent], timeout=timeout)
+        if parent in alive:
+            # If still alive, force kill
+            logger.warning(f"Process {pid} did not terminate gracefully, force killing...")
+            parent.kill()
+        else:
+            logger.info(f"Process {pid} terminated gracefully")
+        
+        # Terminate any remaining children
+        if children:
+            logger.info(f"Terminating {len(children)} child processes...")
+            for child in children:
+                try:
+                    if child.is_running():
+                        child.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            
+            # Wait for children to terminate and kill if necessary
+            gone, alive = psutil.wait_procs(children, timeout=timeout)
+            for child in alive:
+                try:
+                    logger.warning(f"Force killing child process {child.pid}...")
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+    except psutil.NoSuchProcess:
+        logger.info(f"Process {pid} no longer exists")
+    except Exception as e:
+        logger.error(f"Error terminating process tree: {e}")
+
+# Enhanced signal handler with proper cleanup of all resources and child processes
 def signal_handler(sig, frame):
-    print(f"\nReceived signal {sig}, proper termination...")
-    # Explicitly close all threads and resources
+    """
+    Handle termination signals with proper cleanup.
+    
+    Args:
+        sig: Signal number
+        frame: Current stack frame
+    """
+    logger.info(f"Received signal {sig}, proper termination...")
+    
+    # First stop any recording in progress
+    global rec_key_pressed
+    rec_key_pressed = False
+    
+    # Close keyboard listener
     if 'listener' in globals() and listener:
-        listener.stop()
+        try:
+            listener.stop()
+            logger.info("Keyboard listener stopped")
+        except Exception as e:
+            logger.error(f"Error stopping keyboard listener: {e}")
     
     # Close audio devices if they are open
     if 'stream' in globals() and stream:
         try:
             stream.stop()
             stream.close()
-        except:
-            pass
+            logger.info("Audio stream closed")
+        except Exception as e:
+            logger.error(f"Error closing audio stream: {e}")
     
+    # Terminate any child processes related to this application
+    current_pid = os.getpid()
+    logger.info(f"Cleaning up processes (PID: {current_pid})...")
+    
+    # Find and terminate processes related to this application
+    try:
+        # Try to terminate our own process tree
+        terminate_process_tree(current_pid)
+        
+        # Look for other instances of dictation.py that might be orphaned
+        output = subprocess.run(
+            ["pgrep", "-f", "dictation.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+        if output.returncode == 0:
+            for pid_str in output.stdout.strip().split():
+                pid = int(pid_str)
+                if pid != current_pid:  # Don't terminate ourselves
+                    logger.info(f"Found other dictation.py process: {pid}, terminating...")
+                    terminate_process_tree(pid)
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+    
+    logger.info("Cleanup completed, exiting...")
     sys.exit(0)
 
 # Register handlers for various termination signals
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGHUP, signal_handler)
+
+# Get auto-off time from config
+auto_off_time = general_settings.get("auto_off_time", None)
 
 with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-    print(f"Press {rec_key} to start recording")
+    logger.info(f"Press {rec_key} to start recording")
     try:
         while listener.is_alive():
-            if args.auto_off_time is not None and time.time() - time_last_used > args.auto_off_time:
-                print("Auto off")
+            if auto_off_time and auto_off_time > 0 and time.time() - time_last_used > auto_off_time:
+                logger.info("Auto off timeout reached")
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nExiting...")
+        logger.info("Keyboard interrupt received")
         
 # Explicitly close all threads before exit
 if 'listener' in globals() and listener:
     listener.stop()
 
-print("Program successfully terminated")
+logger.info("Program successfully terminated")
