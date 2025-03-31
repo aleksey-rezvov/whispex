@@ -5,7 +5,6 @@ import time
 import signal
 import sys
 import tempfile
-import os
 from pathlib import Path
 
 import numpy as np
@@ -14,9 +13,6 @@ import pyperclip
 import sounddevice as sd
 import soundfile
 from openai import OpenAI
-
-# Get temperature from environment variable or use default value
-WHISPER_TEMPERATURE = float(os.getenv('WHISPER_TEMPERATURE', '0.2'))
 
 # ! you can change this rec_key value
 rec_key = pynput.keyboard.Key.alt_r
@@ -28,7 +24,7 @@ def print(*args, **kwargs):
     return original_print(*args, **kwargs)
 
 # Development prompt to improve transcription for programming and development topics
-DEV_PROMPT = """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
+DEFAULT_PROMPT = """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
 - Software development and programming
 - System administration and DevOps
 - Software architecture and design patterns
@@ -50,10 +46,27 @@ parser.add_argument("language", nargs="?", default=None, help="Language code for
 parser.add_argument("--no-type-using-clipboard", action="store_true", help="Don't use clipboard for typing")
 parser.add_argument("--on-callback", type=str, default=None, help="Command to run after initialization")
 parser.add_argument("--auto-off-time", type=int, default=None, help="Automatically turn off after N seconds of inactivity")
+parser.add_argument("--temperature", type=float, default=0.2, help="Temperature parameter for Whisper model (default: 0.2)")
+parser.add_argument("--prompt", type=str, default=None, help="Custom prompt for Whisper model (use @filepath to load from file)")
 args = parser.parse_args()
 
 # Initialize OpenAI client
 client = OpenAI()
+
+# Проверяем, передан ли prompt через файл
+prompt_arg = args.prompt
+if prompt_arg and prompt_arg.startswith('@'):
+    prompt_file = prompt_arg[1:]  # Удаляем символ @ в начале
+    try:
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            args.prompt = f.read()
+        print(f"Prompt loaded from file: {prompt_file}")
+    except Exception as e:
+        print(f"Error loading prompt from file {prompt_file}: {str(e)}")
+        args.prompt = None
+
+# Set the prompt from command line or use default
+DEV_PROMPT = args.prompt if args.prompt else DEFAULT_PROMPT
 
 if args.on_callback is not None:
     subprocess.run(args.on_callback, shell=True)
@@ -66,7 +79,7 @@ def get_text(audio, context=None):
     
     soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
     actual_prompt = context or DEV_PROMPT
-    print(f"🌐 OpenAI request: lang={args.language}, temp={WHISPER_TEMPERATURE}, prompt=\"{actual_prompt[:30]}...\"")
+    print(f"🌐 OpenAI request: lang={args.language}, temp={args.temperature}, prompt=\"{actual_prompt[:30]}...\"")
     
     try:
         api_response = client.audio.transcriptions.create(
@@ -74,7 +87,7 @@ def get_text(audio, context=None):
             file=open(tmp_audio_filename, "rb"),
             language=args.language,
             prompt=actual_prompt,
-            temperature=WHISPER_TEMPERATURE
+            temperature=args.temperature
         )
         result_text = api_response.text
     finally:
@@ -170,8 +183,8 @@ def on_release(key):
 # Вывод информации о настройках
 if args.language is not None:
     print(f"Using language: {args.language}")
-print(f"Using temperature: {WHISPER_TEMPERATURE}")
-print(f"Using development prompt: {DEV_PROMPT}")
+print(f"Using temperature: {args.temperature}")
+print(f"Using development prompt: {DEV_PROMPT[:50]}...")
 
 # Добавляем обработчик сигналов для корректного завершения
 def signal_handler(sig, frame):

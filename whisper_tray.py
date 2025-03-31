@@ -5,7 +5,23 @@ import sys
 import subprocess
 import threading
 import time
+import json
 from PyQt5 import QtWidgets, QtGui, QtCore
+
+# Константы
+DEFAULT_SETTINGS = {
+    "temperature": 0.2,
+    "prompt": """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
+- Software development and programming
+- System administration and DevOps
+- Software architecture and design patterns
+- Project management and requirements engineering
+- Databases and data structures
+- Algorithms and computational complexity
+- Cloud technologies and infrastructure
+
+When uncertain about a word or phrase, prioritize technical meaning over common usage. Preserve English technical terms even within Russian sentences. The speaker may switch between Russian and English mid-sentence when discussing technical concepts."""
+}
 
 class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def __init__(self, parent=None):
@@ -34,10 +50,14 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         self.has_audio = False
         self.audio_devices = []
         
-        # Создаем окно лога (до меню, чтобы оно было доступно)
+        # Создаем окно лога (до загрузки настроек, чтобы оно было доступно для логирования)
         self.log_window = LogWindow(self.parent_widget)
         # Устанавливаем обратную связь
         self.log_window.tray_icon = self
+        
+        # Загружаем настройки после создания log_window
+        self.settings_path = os.path.join(script_dir, "whispex_settings.json")
+        self.settings = self.load_settings()
         
         # Создаем меню
         self.menu = QtWidgets.QMenu()
@@ -54,6 +74,10 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         # Добавляем действие для просмотра лога
         self.log_action = self.menu.addAction("Показать лог")
         self.log_action.triggered.connect(self.show_log)
+        
+        # Добавляем действие для настроек
+        self.settings_action = self.menu.addAction("Настройки")
+        self.settings_action.triggered.connect(self.show_settings)
         
         # Добавляем разделитель
         self.menu.addSeparator()
@@ -103,11 +127,22 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             # Запускаем через bash для правильной обработки переменных окружения и shell-специфичных команд
             self.log_window.append_text(f"Выполняю bash скрипт: {script_path}")
             
-
-            
-            # Добавляем язык напрямую в аргументы скрипта
+            # Подготовим аргументы командной строки
             command = ["/bin/bash", script_path, "ru"]
-            self.log_window.append_text(f"Команда запуска: {' '.join(command)}")
+            
+            # Добавляем параметр температуры
+            temperature = self.settings.get('temperature', 0.2)
+            command.append(f"--temperature={temperature}")
+            
+            # Добавляем параметр промпта
+            # Сначала сохраняем промпт во временный файл для избежания проблем с передачей длинного текста
+            prompt_file = os.path.join(script_dir, ".whisper_prompt.tmp")
+            with open(prompt_file, 'w', encoding='utf-8') as f:
+                f.write(self.settings.get('prompt', DEFAULT_SETTINGS['prompt']))
+            
+            command.append(f"--prompt=@{prompt_file}")
+            
+            self.log_window.append_text(f"Команда запуска: {' '.join(command[:3])} [параметры опущены]")
             
             self.process = subprocess.Popen(
                 command,
@@ -457,6 +492,211 @@ print(json.dumps(sd.query_devices()))
             self.audio_error = str(e)
             self.log_window.append_text(f"❌ Исключение при проверке аудио: {str(e)}")
 
+    def load_settings(self):
+        """Загружает настройки из файла или возвращает значения по умолчанию"""
+        # Вспомогательная функция для безопасного логирования
+        def log_message(message):
+            if hasattr(self, 'log_window') and self.log_window:
+                self.log_window.append_text(message)
+            else:
+                print(message)
+        
+        try:
+            if os.path.exists(self.settings_path):
+                try:
+                    with open(self.settings_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        settings = json.loads(content)
+                except UnicodeDecodeError:
+                    # Пробуем с другой кодировкой, если utf-8 не сработал
+                    with open(self.settings_path, 'r', encoding='latin-1') as f:
+                        content = f.read()
+                        settings = json.loads(content)
+                        log_message("⚠️ Файл настроек был прочитан с использованием альтернативной кодировки")
+                
+                # Проверяем, что все необходимые ключи присутствуют
+                for key, value in DEFAULT_SETTINGS.items():
+                    if key not in settings:
+                        settings[key] = value
+                log_message(f"✅ Настройки загружены из {self.settings_path}")
+                log_message(f"   Температура: {settings.get('temperature', 0.2)}")
+                log_message(f"   Длина промпта: {len(settings.get('prompt', ''))}")
+                return settings
+            else:
+                log_message(f"⚠️ Файл настроек не найден: {self.settings_path}")
+        except json.JSONDecodeError as je:
+            log_message(f"❌ Ошибка формата JSON в файле настроек: {str(je)}")
+            log_message(f"   Файл настроек будет переименован и создан новый")
+            # Если файл поврежден, переименовываем его и создаем новый
+            backup_path = f"{self.settings_path}.bak.{int(time.time())}"
+            try:
+                os.rename(self.settings_path, backup_path)
+                log_message(f"✅ Резервная копия сохранена: {backup_path}")
+            except Exception as e:
+                log_message(f"❌ Не удалось создать резервную копию: {str(e)}")
+        except Exception as e:
+            log_message(f"❌ Ошибка при загрузке настроек: {str(e)}")
+            import traceback
+            log_message(traceback.format_exc())
+        
+        # Возвращаем настройки по умолчанию в случае ошибки
+        log_message(f"ℹ️ Используются настройки по умолчанию")
+        return DEFAULT_SETTINGS.copy()
+    
+    def save_settings(self):
+        """Сохраняет настройки в файл"""
+        # Вспомогательная функция для безопасного логирования
+        def log_message(message):
+            if hasattr(self, 'log_window') and self.log_window:
+                self.log_window.append_text(message)
+            else:
+                print(message)
+                
+        try:
+            # Проверяем права доступа к директории
+            settings_dir = os.path.dirname(self.settings_path)
+            if not os.access(settings_dir, os.W_OK):
+                log_message(f"❌ Нет прав на запись в директорию: {settings_dir}")
+                return False
+                
+            # Сначала создаем временный файл для безопасного сохранения
+            temp_path = f"{self.settings_path}.tmp"
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json_str = json.dumps(self.settings, ensure_ascii=False, indent=4)
+                f.write(json_str)
+            
+            # Если временный файл успешно создан, переименовываем его
+            os.replace(temp_path, self.settings_path)
+            
+            log_message(f"✅ Настройки сохранены в файл: {self.settings_path}")
+            log_message(f"   Температура: {self.settings.get('temperature', 0.2)}")
+            log_message(f"   Длина промпта: {len(self.settings.get('prompt', ''))}")
+            return True
+        except Exception as e:
+            log_message(f"❌ Ошибка при сохранении настроек: {str(e)}")
+            import traceback
+            log_message(traceback.format_exc())
+            return False
+            
+    def show_settings(self):
+        """Показывает диалог настроек"""
+        # Вспомогательная функция для безопасного логирования
+        def log_message(message):
+            if hasattr(self, 'log_window') and self.log_window:
+                self.log_window.append_text(message)
+            else:
+                print(message)
+                
+        log_message("⚙️ Открываю диалог настроек...")
+        settings_dialog = SettingsDialog(self.settings, self.parent_widget)
+        if settings_dialog.exec_() == QtWidgets.QDialog.Accepted:
+            # Обновляем настройки
+            old_settings = self.settings.copy()
+            self.settings = settings_dialog.get_settings()
+            
+            # Выводим информацию о новых настройках
+            log_message(f"ℹ️ Новые настройки:")
+            log_message(f"   Температура: {self.settings.get('temperature', 0.2)}")
+            log_message(f"   Длина промпта: {len(self.settings.get('prompt', ''))}")
+            
+            # Сохраняем в файл
+            if self.save_settings():
+                log_message("✅ Настройки сохранены успешно")
+                
+                # Если процесс уже запущен, перезапускаем его с новыми настройками
+                if self.running:
+                    log_message("🔄 Перезапуск процесса с новыми настройками...")
+                    # Останавливаем текущий процесс
+                    self.stop_whisper()
+                    # Запускаем процесс с новыми настройками
+                    self.start_remote_whisper()
+            else:
+                log_message("❌ Не удалось сохранить настройки")
+
+class SettingsDialog(QtWidgets.QDialog):
+    def __init__(self, settings, parent=None):
+        super().__init__(parent)
+        self.settings = settings.copy()
+        self.setWindowTitle("Настройки Whispex")
+        self.resize(700, 500)
+        
+        # Устанавливаем иконку для окна настроек
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(script_dir, "whispex.png")
+        
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QtGui.QIcon(icon_path))
+        
+        # Создаем виджеты
+        layout = QtWidgets.QVBoxLayout()
+        
+        # Температура
+        temp_layout = QtWidgets.QHBoxLayout()
+        temp_label = QtWidgets.QLabel("Температура:")
+        self.temp_spinbox = QtWidgets.QDoubleSpinBox()
+        self.temp_spinbox.setMinimum(0.0)
+        self.temp_spinbox.setMaximum(1.0)
+        self.temp_spinbox.setSingleStep(0.1)
+        self.temp_spinbox.setValue(settings.get('temperature', 0.2))
+        self.temp_spinbox.setToolTip("Значение от 0.0 до 1.0. Меньшие значения делают вывод более детерминированным.")
+        temp_layout.addWidget(temp_label)
+        temp_layout.addWidget(self.temp_spinbox)
+        layout.addLayout(temp_layout)
+        
+        # Промпт
+        prompt_label = QtWidgets.QLabel("Промпт для Whisper:")
+        layout.addWidget(prompt_label)
+        
+        self.prompt_text = QtWidgets.QTextEdit()
+        self.prompt_text.setPlainText(settings.get('prompt', DEFAULT_SETTINGS['prompt']))
+        layout.addWidget(self.prompt_text)
+        
+        # Кнопки
+        button_layout = QtWidgets.QHBoxLayout()
+        
+        reset_button = QtWidgets.QPushButton("Сбросить настройки")
+        reset_button.clicked.connect(self.reset_settings)
+        
+        apply_button = QtWidgets.QPushButton("Применить")
+        apply_button.clicked.connect(self.accept)
+        
+        cancel_button = QtWidgets.QPushButton("Отмена")
+        cancel_button.clicked.connect(self.reject)
+        
+        button_layout.addWidget(reset_button)
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(apply_button)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+    
+    def reset_settings(self):
+        """Сбрасывает настройки к значениям по умолчанию"""
+        self.temp_spinbox.setValue(DEFAULT_SETTINGS.get('temperature', 0.2))
+        self.prompt_text.setPlainText(DEFAULT_SETTINGS.get('prompt', ''))
+    
+    def get_settings(self):
+        """Возвращает текущие настройки из диалога"""
+        settings = self.settings.copy()
+        
+        # Получаем и проверяем температуру
+        temperature = self.temp_spinbox.value()
+        settings['temperature'] = temperature
+        
+        # Получаем и проверяем промпт
+        prompt = self.prompt_text.toPlainText()
+        # Проверяем, не пустой ли промпт
+        if not prompt.strip():
+            prompt = DEFAULT_SETTINGS['prompt']
+            print(f"ВНИМАНИЕ: Промпт был пустым, использован промпт по умолчанию")
+        settings['prompt'] = prompt
+        
+        # Выводим отладочную информацию
+        print(f"DEBUG: get_settings -> temperature={temperature}, prompt_length={len(prompt)}")
+        
+        return settings
+
 class LogWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -491,6 +731,11 @@ class LogWindow(QtWidgets.QDialog):
         check_deps_button = QtWidgets.QPushButton("Проверить зависимости")
         check_deps_button.clicked.connect(self.parent_check_deps)
         button_layout.addWidget(check_deps_button)
+        
+        # Добавляем кнопку настроек
+        settings_button = QtWidgets.QPushButton("Настройки")
+        settings_button.clicked.connect(self.show_settings)
+        button_layout.addWidget(settings_button)
         
         # Добавляем кнопки управления
         start_button = QtWidgets.QPushButton("Запустить")
@@ -530,6 +775,12 @@ class LogWindow(QtWidgets.QDialog):
         if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'stop_whisper'):
             self.append_text("🛑 Остановка службы распознавания...")
             self.tray_icon.stop_whisper()
+    
+    def show_settings(self):
+        # Показываем настройки через tray_icon
+        if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'show_settings'):
+            self.append_text("⚙️ Открываю настройки...")
+            self.tray_icon.show_settings()
     
     @QtCore.pyqtSlot(str)
     def append_text(self, text):
