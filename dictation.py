@@ -5,6 +5,7 @@ import time
 import signal
 import sys
 import tempfile
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,9 @@ import pyperclip
 import sounddevice as sd
 import soundfile
 from openai import OpenAI
+
+# Get temperature from environment variable or use default value
+WHISPER_TEMPERATURE = float(os.getenv('WHISPER_TEMPERATURE', '0.2'))
 
 # ! you can change this rec_key value
 rec_key = pynput.keyboard.Key.alt_r
@@ -62,7 +66,7 @@ def get_text(audio, context=None):
     
     soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
     actual_prompt = context or DEV_PROMPT
-    print(f"🌐 OpenAI request: lang={args.language}, prompt=\"{actual_prompt[:30]}...\"")
+    print(f"🌐 OpenAI request: lang={args.language}, temp={WHISPER_TEMPERATURE}, prompt=\"{actual_prompt[:30]}...\"")
     
     try:
         api_response = client.audio.transcriptions.create(
@@ -70,6 +74,7 @@ def get_text(audio, context=None):
             file=open(tmp_audio_filename, "rb"),
             language=args.language,
             prompt=actual_prompt,
+            temperature=WHISPER_TEMPERATURE
         )
         result_text = api_response.text
     finally:
@@ -165,6 +170,7 @@ def on_release(key):
 # Вывод информации о настройках
 if args.language is not None:
     print(f"Using language: {args.language}")
+print(f"Using temperature: {WHISPER_TEMPERATURE}")
 print(f"Using development prompt: {DEV_PROMPT}")
 
 # Добавляем обработчик сигналов для корректного завершения
