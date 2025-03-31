@@ -9,7 +9,7 @@ export PYTHONUNBUFFERED=1
 
 # Запускаем Python скрипт и сохраняем его PID
 # Используем stdbuf для отключения буферизации stdout и stderr
-stdbuf -o0 -e0 venv/bin/python3 dictation.py remote "$@" &
+stdbuf -o0 -e0 venv/bin/python3 dictation.py "$@" &
 PYTHON_PID=$!
 
 # Функция для обработки сигналов завершения

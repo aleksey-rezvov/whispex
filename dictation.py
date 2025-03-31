@@ -5,13 +5,14 @@ import time
 import signal
 import sys
 import tempfile
-import os
 from pathlib import Path
 
 import numpy as np
 import pynput
 import pyperclip
 import sounddevice as sd
+import soundfile
+from openai import OpenAI
 
 # ! you can change this rec_key value
 rec_key = pynput.keyboard.Key.alt_r
@@ -41,43 +42,20 @@ controller = pynput.keyboard.Controller()
 
 # Parse arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("engine", choices=["local", "remote"])
-parser.add_argument("language", nargs="?", default=None)
-parser.add_argument("--no-type-using-clipboard", action="store_true")
-parser.add_argument("--on-callback", type=str, default=None)
-parser.add_argument("--auto-off-time", type=int, default=None)
-parser.add_argument("--model", type=str, default="large-v3")
+parser.add_argument("language", nargs="?", default=None, help="Language code for transcription (e.g. 'ru', 'en')")
+parser.add_argument("--no-type-using-clipboard", action="store_true", help="Don't use clipboard for typing")
+parser.add_argument("--on-callback", type=str, default=None, help="Command to run after initialization")
+parser.add_argument("--auto-off-time", type=int, default=None, help="Automatically turn off after N seconds of inactivity")
 args = parser.parse_args()
 
-# Initialize engine (local or remote)
-if args.engine == "local":
-    from faster_whisper import WhisperModel
-
-    model = WhisperModel(args.model, device="cuda", compute_type="float16")
-elif args.engine == "remote":
-    import soundfile
-    from openai import OpenAI
-
-    client = OpenAI()
-else:
-    raise ValueError("Specify whether to use local or remote engine")
+# Initialize OpenAI client
+client = OpenAI()
 
 if args.on_callback is not None:
     subprocess.run(args.on_callback, shell=True)
 
 
-def get_text_local(audio, context=None):
-    actual_prompt = context or DEV_PROMPT
-    print(f"🎯 Local request: lang={args.language}, prompt=\"{actual_prompt[:30]}...\"")
-    segments, info = model.transcribe(
-        audio, beam_size=5, language=args.language, initial_prompt=actual_prompt
-    )
-    segments = list(segments)
-    text = " ".join([segment.text.strip() for segment in segments])
-    return text
-
-
-def get_text_remote(audio, context=None):
+def get_text(audio, context=None):
     # Создаем временный файл в директории /tmp с правильным расширением
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         tmp_audio_filename = temp_file.name
@@ -156,10 +134,7 @@ def record_and_process():
     context = None  # Use dev-prompt by default
 
     # Транскрибация
-    if args.engine == "local":
-        text = get_text_local(recorded_audio, context)
-    elif args.engine == "remote":
-        text = get_text_remote(recorded_audio, context)
+    text = get_text(recorded_audio, context)
     print(text)
 
     # Ввод текста
