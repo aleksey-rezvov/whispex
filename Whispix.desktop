@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Whispix
+Comment=Служба распознавания речи OpenAI Whisper
+Exec=/home/arezvov/projects/ais/whisper-simple-dictation/whisper_tray.py
+Icon=/home/arezvov/projects/ais/whisper-simple-dictation/whispix.png
+Terminal=false
+Type=Application
+Categories=Audio;Utility;
+StartupNotify=true

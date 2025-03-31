@@ -10,13 +10,22 @@ from PyQt5 import QtWidgets, QtGui, QtCore
 class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setIcon(QtGui.QIcon.fromTheme("audio-input-microphone"))
+        
+        # Используем пользовательскую иконку
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(script_dir, "whispix.png")
+        
+        if os.path.exists(icon_path):
+            self.setIcon(QtGui.QIcon(icon_path))
+        else:
+            # Запасной вариант - системная иконка
+            self.setIcon(QtGui.QIcon.fromTheme("audio-input-microphone"))
+            print(f"Предупреждение: иконка не найдена по пути {icon_path}")
         
         # Сохраняем родительский виджет
         self.parent_widget = parent
         
         # Проверяем наличие виртуального окружения
-        script_dir = os.path.dirname(os.path.abspath(__file__))
         self.venv_python = os.path.join(script_dir, "venv/bin/python3")
         self.venv_pip = os.path.join(script_dir, "venv/bin/pip")
         self.has_venv = os.path.exists(self.venv_python)
@@ -121,7 +130,12 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             self.output_reader.start()
             
             # Показываем уведомление
-            self.showMessage("Whisper Dictation", "Сервис распознавания речи запущен", QtGui.QIcon.fromTheme("audio-input-microphone"), 3000)
+            self.showMessage(
+                "Whispix", 
+                "Сервис распознавания речи запущен", 
+                QtGui.QIcon(os.path.join(script_dir, "whispix.png")) if os.path.exists(os.path.join(script_dir, "whispix.png")) else QtGui.QIcon.fromTheme("audio-input-microphone"), 
+                3000
+            )
             
         except Exception as e:
             self.log_window.append_text(f"Ошибка запуска: {str(e)}")
@@ -446,8 +460,15 @@ print(json.dumps(sd.query_devices()))
 class LogWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Лог Whisper Dictation")
+        self.setWindowTitle("Whispix")
         self.resize(700, 500)
+        
+        # Устанавливаем иконку для окна лога
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(script_dir, "whispix.png")
+        
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QtGui.QIcon(icon_path))
         
         # Инициализируем ссылку на tray_icon
         self.tray_icon = None
@@ -471,6 +492,15 @@ class LogWindow(QtWidgets.QDialog):
         check_deps_button.clicked.connect(self.parent_check_deps)
         button_layout.addWidget(check_deps_button)
         
+        # Добавляем кнопки управления
+        start_button = QtWidgets.QPushButton("Запустить")
+        start_button.clicked.connect(self.start_service)
+        button_layout.addWidget(start_button)
+        
+        stop_button = QtWidgets.QPushButton("Остановить")
+        stop_button.clicked.connect(self.stop_service)
+        button_layout.addWidget(stop_button)
+        
         # Создаем компоновку
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.log_text)
@@ -488,6 +518,18 @@ class LogWindow(QtWidgets.QDialog):
         if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'check_and_install_dependencies'):
             self.append_text("🔍 Повторная проверка зависимостей...")
             self.tray_icon.check_and_install_dependencies()
+    
+    def start_service(self):
+        # Запускаем сервис через tray_icon
+        if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'start_remote_whisper'):
+            self.append_text("🚀 Запуск службы распознавания...")
+            self.tray_icon.start_remote_whisper()
+    
+    def stop_service(self):
+        # Останавливаем сервис через tray_icon
+        if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'stop_whisper'):
+            self.append_text("🛑 Остановка службы распознавания...")
+            self.tray_icon.stop_whisper()
     
     @QtCore.pyqtSlot(str)
     def append_text(self, text):
@@ -535,10 +577,13 @@ if __name__ == "__main__":
             tray_icon.log_window.append_text(f"    Детали ошибки: {tray_icon.audio_error}")
     
     # Показываем сообщение при запуске
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whispix.png")
+    notification_icon = QtGui.QIcon(icon_path) if os.path.exists(icon_path) else QtGui.QIcon.fromTheme("audio-input-microphone")
+    
     tray_icon.showMessage(
-        "Whisper Dictation", 
+        "Whispix", 
         "Приложение запущено в системном трее", 
-        QtGui.QIcon.fromTheme("audio-input-microphone"), 
+        notification_icon, 
         3000
     )
     
