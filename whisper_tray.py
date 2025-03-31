@@ -13,7 +13,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         
         # Используем пользовательскую иконку
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(script_dir, "whispix.png")
+        icon_path = os.path.join(script_dir, "whispex.png")
         
         if os.path.exists(icon_path):
             self.setIcon(QtGui.QIcon(icon_path))
@@ -131,9 +131,9 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             
             # Показываем уведомление
             self.showMessage(
-                "Whispix", 
+                "Whispex", 
                 "Сервис распознавания речи запущен", 
-                QtGui.QIcon(os.path.join(script_dir, "whispix.png")) if os.path.exists(os.path.join(script_dir, "whispix.png")) else QtGui.QIcon.fromTheme("audio-input-microphone"), 
+                QtGui.QIcon(os.path.join(script_dir, "whispex.png")) if os.path.exists(os.path.join(script_dir, "whispex.png")) else QtGui.QIcon.fromTheme("audio-input-microphone"), 
                 3000
             )
             
@@ -460,12 +460,12 @@ print(json.dumps(sd.query_devices()))
 class LogWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Whispix")
+        self.setWindowTitle("Whispex")
         self.resize(700, 500)
         
         # Устанавливаем иконку для окна лога
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(script_dir, "whispix.png")
+        icon_path = os.path.join(script_dir, "whispex.png")
         
         if os.path.exists(icon_path):
             self.setWindowIcon(QtGui.QIcon(icon_path))
@@ -577,11 +577,11 @@ if __name__ == "__main__":
             tray_icon.log_window.append_text(f"    Детали ошибки: {tray_icon.audio_error}")
     
     # Показываем сообщение при запуске
-    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whispix.png")
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whispex.png")
     notification_icon = QtGui.QIcon(icon_path) if os.path.exists(icon_path) else QtGui.QIcon.fromTheme("audio-input-microphone")
     
     tray_icon.showMessage(
-        "Whispix", 
+        "Whispex", 
         "Приложение запущено в системном трее", 
         notification_icon, 
         3000

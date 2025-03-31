@@ -1,4 +1,4 @@
-# Whisper simple dictation
+# Whispex
 
 - press a key to start recording
 - release it to stop recording
@@ -14,8 +14,8 @@ With remote execution, OpenAI's API has about 1 second delay (as of Jan 2024), w
 ## Installation
 
 ```bash
-git clone https://github.com/filyp/whisper-simple-dictation.git
-cd whisper-simple-dictation
+git clone https://github.com/aleksey-rezvov/whispex.git
+cd whispex
 python3 -m venv venv --copies
 ```
 
@@ -65,7 +65,7 @@ By default the record key is *right* ctrl. You can change it in `dictation.py`, 
 
 Note that the way we send text is by copying it to the clipboard and then sending Ctrl+Shift+V. That's because typing the text normally is complicated to do right, with all the special characters.
 
-To set up a service that will run whisper-simple-dictation, take a look at `example_service_file.service`.
+To set up a service that will run whispex, take a look at `example_service_file.service`.
 
 ## Options
 
