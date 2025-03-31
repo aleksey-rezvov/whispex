@@ -5,10 +5,10 @@ A voice dictation tool that uses OpenAI's Whisper model for transcription, espec
 ## Installation
 
 ```bash
-# Установка uv
+# Install uv
 curl -fsSL https://astral.sh/uv/install.sh | bash
 
-# Установка зависимостей с помощью uv
+# Install dependencies using uv
 uv add numpy pynput pyperclip sounddevice soundfile openai tomli
 ```
 

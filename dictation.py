@@ -16,44 +16,44 @@ import soundfile
 from openai import OpenAI
 import tomli
 
-# Функция для получения пути к файлу конфигурации
+# Function to get the configuration file path
 def get_config_path():
-    # Путь к пользовательскому конфигу
+    # Path to user config
     user_config_dir = Path.home() / ".config" / "whispex"
     user_config_path = user_config_dir / "config.toml"
     
-    # Путь к конфигу по умолчанию в директории приложения
+    # Path to default config in application directory
     script_dir = Path(__file__).parent
     default_config_path = script_dir / "default_config.toml"
     
-    # Проверяем, существует ли пользовательский конфиг
+    # Check if user config exists
     if user_config_path.exists():
         return user_config_path
     else:
-        # Если нет пользовательского конфига, используем дефолтный
+        # If no user config, use default
         if default_config_path.exists():
             return default_config_path
         else:
-            print(f"Ошибка: Не найден файл конфигурации. Ни {user_config_path}, ни {default_config_path} не существуют.")
+            print(f"Error: Configuration file not found. Neither {user_config_path} nor {default_config_path} exist.")
             sys.exit(1)
 
-# Загрузка конфигурации
+# Loading configuration
 def load_config():
     config_path = get_config_path()
-    print(f"Загрузка конфигурации из: {config_path}")
+    print(f"Loading configuration from: {config_path}")
     
     try:
         with open(config_path, "rb") as f:
             return tomli.load(f)
     except Exception as e:
-        print(f"Ошибка при чтении конфигурации: {e}")
+        print(f"Error reading configuration: {e}")
         sys.exit(1)
 
-# Загружаем конфигурацию
+# Load configuration
 config = load_config()
-print("Настройки из файла конфигурации могут быть перезаписаны параметрами командной строки.")
+print("Settings from the configuration file can be overridden by command line parameters.")
 
-# Переопределяем стандартный print для автоматического сброса буфера
+# Override standard print for automatic buffer flushing
 original_print = print
 def print(*args, **kwargs):
     kwargs['flush'] = True
@@ -74,7 +74,7 @@ When uncertain about a word or phrase, prioritize technical meaning over common 
 whisper_samplerate = 16000  # sampling rate that whisper uses
 recording_samplerate = 48000  # multiple of whisper_samplerate, widely supported
 
-# Преобразование строки клавиши в объект Key
+# Convert key string to Key object
 def get_key_from_string(key_str):
     if key_str == "alt_r":
         return pynput.keyboard.Key.alt_r
@@ -84,11 +84,11 @@ def get_key_from_string(key_str):
         return pynput.keyboard.Key.ctrl_r
     elif key_str == "ctrl_l":
         return pynput.keyboard.Key.ctrl_l
-    # Добавьте другие специальные клавиши по необходимости
+    # Add other special keys as needed
     else:
-        return key_str  # Для обычных клавиш
+        return key_str  # For regular keys
 
-# Настройки из конфига с дефолтными значениями
+# Settings from config with default values
 rec_key = get_key_from_string(config.get("general", {}).get("rec_key", "alt_r"))
 default_language = config.get("general", {}).get("language", "en")
 default_temperature = config.get("whisper", {}).get("temperature", 0.2)
@@ -108,19 +108,19 @@ parser.add_argument("--temperature", type=float, default=default_temperature, he
 parser.add_argument("--prompt", type=str, default=None, help="Custom prompt for Whisper model (use @filepath to load from file)")
 args = parser.parse_args()
 
-# Проверка наличия API ключа
+# Check for API key
 if not openai_api_key and not os.environ.get("OPENAI_API_KEY"):
-    print("ВНИМАНИЕ: API ключ OpenAI не указан ни в конфигурации, ни в переменной окружения OPENAI_API_KEY")
-    print("Работа с OpenAI API будет невозможна без действительного ключа.")
-    print("Добавьте ключ в ~/.config/whispex/config.toml или установите переменную окружения OPENAI_API_KEY")
+    print("WARNING: OpenAI API key is not specified either in the configuration or in the OPENAI_API_KEY environment variable")
+    print("Working with OpenAI API will not be possible without a valid key.")
+    print("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
 
 # Initialize OpenAI client
 client = OpenAI(api_key=openai_api_key)
 
-# Проверяем, передан ли prompt через файл
+# Check if prompt is provided via file
 prompt_arg = args.prompt
 if prompt_arg and prompt_arg.startswith('@'):
-    prompt_file = prompt_arg[1:]  # Удаляем символ @ в начале
+    prompt_file = prompt_arg[1:]  # Remove @ at the beginning
     try:
         with open(prompt_file, 'r', encoding='utf-8') as f:
             args.prompt = f.read()
@@ -137,7 +137,7 @@ if args.on_callback is not None:
 
 
 def get_text(audio, context=None):
-    # Создаем временный файл в директории /tmp с правильным расширением
+    # Create a temporary file in /tmp directory with the correct extension
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         tmp_audio_filename = temp_file.name
     
@@ -155,7 +155,7 @@ def get_text(audio, context=None):
         )
         result_text = api_response.text
     finally:
-        # Удаляем временный файл после использования
+        # Remove the temporary file after use
         tmp_path = Path(tmp_audio_filename)
         if tmp_path.exists():
             tmp_path.unlink()
@@ -184,18 +184,18 @@ def type_text(text):
     elif input_method == "direct":
         controller.type(text)
     else:
-        print(f"Неизвестный метод ввода: {input_method}. Использую прямой ввод.")
+        print(f"Unknown input method: {input_method}. Using direct input.")
         controller.type(text)
 
 
 rec_key_pressed = False
 time_last_used = time.time()
 
-# Глобальная переменная для аудио-потока
+# Global audio stream variable
 stream = None
 
 def record_and_process():
-    # Запись и обработка аудио
+    # Recording and processing audio
     global stream
     audio_chunks = []
 
@@ -218,22 +218,22 @@ def record_and_process():
     stream = None
     recorded_audio = np.concatenate(audio_chunks)[:, 0]
 
-    # Проверка длительности записи
+    # Check recording duration
     duration = len(recorded_audio) / recording_samplerate
     if duration <= 0.1:
         print("Recording too short, skipping")
         return
 
-    # Даунсэмплинг
+    # Downsampling
     recorded_audio = recorded_audio[::3]
 
     context = None  # Use dev-prompt by default
 
-    # Транскрибация
+    # Transcription
     text = get_text(recorded_audio, context)
     print(text)
 
-    # Ввод текста
+    # Input text
     text = text + " "
     type_text(text)
 
@@ -255,21 +255,21 @@ def on_release(key):
         time_last_used = time.time()
 
 
-# Вывод информации о настройках
-print(f"Используемый язык: {args.language}")
-print(f"Температура модели: {args.temperature}")
-print(f"Клавиша записи: {rec_key}")
-print(f"Метод ввода: {input_method}")
-print(f"Промпт: {DEV_PROMPT[:50]}...")
+# Display settings information
+print(f"Language: {args.language}")
+print(f"Model temperature: {args.temperature}")
+print(f"Recording key: {rec_key}")
+print(f"Input method: {input_method}")
+print(f"Prompt: {DEV_PROMPT[:50]}...")
 
-# Добавляем обработчик сигналов для корректного завершения
+# Add signal handler for proper termination
 def signal_handler(sig, frame):
-    print(f"\nПолучен сигнал {sig}, корректное завершение...")
-    # Явное закрытие всех потоков и ресурсов
+    print(f"\nReceived signal {sig}, proper termination...")
+    # Explicitly close all threads and resources
     if 'listener' in globals() and listener:
         listener.stop()
     
-    # Закрытие аудио-устройств, если они открыты
+    # Close audio devices if they are open
     if 'stream' in globals() and stream:
         try:
             stream.stop()
@@ -279,12 +279,12 @@ def signal_handler(sig, frame):
     
     sys.exit(0)
 
-# Регистрируем обработчики различных сигналов завершения
+# Register handlers for various termination signals
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-    print(f"Нажмите {rec_key} для начала записи")
+    print(f"Press {rec_key} to start recording")
     try:
         while listener.is_alive():
             if args.auto_off_time is not None and time.time() - time_last_used > args.auto_off_time:
@@ -292,10 +292,10 @@ with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as liste
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nВыход...")
+        print("\nExiting...")
         
-# Явное закрытие всех потоков перед выходом
+# Explicitly close all threads before exit
 if 'listener' in globals() and listener:
     listener.stop()
 
-print("Программа успешно завершена")
+print("Program successfully terminated")

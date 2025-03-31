@@ -10,25 +10,25 @@ from pathlib import Path
 import tomli
 from PyQt5 import QtWidgets, QtGui, QtCore
 
-# Загрузка конфигурации из TOML
+# Loading configuration from TOML
 def get_config_path():
-    # Путь к пользовательскому конфигу
+    # Path to user config
     user_config_dir = Path.home() / ".config" / "whispex"
     user_config_path = user_config_dir / "config.toml"
     
-    # Путь к конфигу по умолчанию в директории приложения
+    # Path to default config in application directory
     script_dir = Path(__file__).parent
     default_config_path = script_dir / "default_config.toml"
     
-    # Проверяем, существует ли пользовательский конфиг
+    # Check if user config exists
     if user_config_path.exists():
         return user_config_path
     else:
-        # Если нет пользовательского конфига, используем дефолтный
+        # If no user config, use default
         if default_config_path.exists():
             return default_config_path
         else:
-            print(f"Ошибка: Не найден файл конфигурации. Ни {user_config_path}, ни {default_config_path} не существуют.")
+            print(f"Error: Configuration file not found. Neither {user_config_path} nor {default_config_path} exist.")
             return None
 
 def load_config():
@@ -36,19 +36,19 @@ def load_config():
     if not config_path:
         return {}
     
-    print(f"Загрузка конфигурации из: {config_path}")
+    print(f"Loading configuration from: {config_path}")
     
     try:
         with open(config_path, "rb") as f:
             return tomli.load(f)
     except Exception as e:
-        print(f"Ошибка при чтении конфигурации: {e}")
+        print(f"Error reading configuration: {e}")
         return {}
 
-# Загружаем настройки из TOML
+# Load settings from TOML
 config = load_config()
 
-# Константы
+# Constants
 DEFAULT_SETTINGS = {
     "temperature": 0.2,
     "prompt": """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
@@ -67,60 +67,60 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # Используем пользовательскую иконку
+        # Use custom icon
         script_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(script_dir, "whispex.png")
         
         if os.path.exists(icon_path):
             self.setIcon(QtGui.QIcon(icon_path))
         else:
-            # Запасной вариант - системная иконка
+            # Fallback to system icon
             self.setIcon(QtGui.QIcon.fromTheme("audio-input-microphone"))
-            print(f"Предупреждение: иконка не найдена по пути {icon_path}")
+            print(f"Warning: Icon not found at path {icon_path}")
         
-        # Сохраняем родительский виджет
+        # Save parent widget
         self.parent_widget = parent
         
-        # Проверка аудио устройств будет после меню
+        # Audio device check will happen after menu creation
         self.has_audio = False
         self.audio_devices = []
         
-        # Создаем окно лога (до загрузки настроек, чтобы оно было доступно для логирования)
+        # Create log window (before loading settings, so it's available for logging)
         self.log_window = LogWindow(self.parent_widget)
-        # Устанавливаем обратную связь
+        # Set feedback reference
         self.log_window.tray_icon = self
         
-        # Создаем меню
+        # Create menu
         self.menu = QtWidgets.QMenu()
         
-        # Добавляем действия для запуска
-        self.start_remote_action = self.menu.addAction("Запустить")
+        # Add start action
+        self.start_remote_action = self.menu.addAction("Start")
         self.start_remote_action.triggered.connect(self.start_remote_whisper)
         
-        # Добавляем действие для остановки
-        self.stop_action = self.menu.addAction("Остановить")
+        # Add stop action
+        self.stop_action = self.menu.addAction("Stop")
         self.stop_action.triggered.connect(self.stop_whisper)
         self.stop_action.setEnabled(False)
         
-        # Добавляем действие для просмотра лога
-        self.log_action = self.menu.addAction("Показать лог")
+        # Add log view action
+        self.log_action = self.menu.addAction("Show Log")
         self.log_action.triggered.connect(self.show_log)
         
-        # Добавляем действие для настроек
-        self.settings_action = self.menu.addAction("Настройки")
+        # Add settings action
+        self.settings_action = self.menu.addAction("Settings")
         self.settings_action.triggered.connect(self.show_settings)
         
-        # Добавляем разделитель
+        # Add separator
         self.menu.addSeparator()
         
-        # Добавляем действие для выхода
-        exit_action = self.menu.addAction("Выход")
+        # Add exit action
+        exit_action = self.menu.addAction("Exit")
         exit_action.triggered.connect(self.exit_app)
         
-        # Устанавливаем меню
+        # Set menu
         self.setContextMenu(self.menu)
         
-        # Инициализируем переменные для процесса
+        # Initialize process variables
         self.process = None
         self.output_reader = None
         self.running = False
@@ -130,24 +130,24 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             self.start_whisper("dictation.py")
     
     def start_whisper(self, script_name):
-        self.log_window.append_text(f"Запускаю {script_name}...")
+        self.log_window.append_text(f"Starting {script_name}...")
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Настраиваем окружение для запуска скрипта
+        # Configure environment for script execution
         env = os.environ.copy()
         
-        # Отключаем буферизацию Python вывода
+        # Disable Python output buffering
         env['PYTHONUNBUFFERED'] = '1'
         
         try:
-            # Выполняем скрипт через uv run
-            self.log_window.append_text(f"Выполняю скрипт через uv: {script_name}")
+            # Execute script through uv run
+            self.log_window.append_text(f"Executing script via uv: {script_name}")
             
-            # Запускаем скрипт с помощью uv run @uv
+            # Launch script using uv run @uv
             command = ["uv", "run", "@uv", script_name]
             
-            self.log_window.append_text(f"Команда запуска: {' '.join(command)}")
+            self.log_window.append_text(f"Launch command: {' '.join(command)}")
             
             self.process = subprocess.Popen(
                 command,
@@ -156,57 +156,57 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 universal_newlines=True,
                 bufsize=1,
                 env=env,
-                cwd=script_dir  # Важно! Запускаем в директории проекта
+                cwd=script_dir  # Important! Run in project directory
             )
             
-            # Обновляем состояние GUI
+            # Update GUI state
             self.running = True
             self.start_remote_action.setEnabled(False)
             self.stop_action.setEnabled(True)
             
-            # Запускаем поток для чтения вывода
+            # Start thread for reading output
             self.output_reader = threading.Thread(target=self.read_output)
             self.output_reader.daemon = True
             self.output_reader.start()
             
-            # Показываем уведомление
+            # Show notification
             self.showMessage(
                 "Whispex", 
-                "Сервис распознавания речи запущен", 
+                "Speech recognition service started", 
                 QtGui.QIcon(os.path.join(script_dir, "whispex.png")) if os.path.exists(os.path.join(script_dir, "whispex.png")) else QtGui.QIcon.fromTheme("audio-input-microphone"), 
                 3000
             )
             
         except Exception as e:
-            self.log_window.append_text(f"Ошибка запуска: {str(e)}")
-            # Печатаем стек-трейс для отладки
+            self.log_window.append_text(f"Launch error: {str(e)}")
+            # Print stack trace for debugging
             import traceback
             self.log_window.append_text(traceback.format_exc())
     
     def read_output(self):
         try:
             if self.process:
-                # Создаем потоки для чтения stdout и stderr
+                # Create threads for reading stdout and stderr
                 stdout_thread = threading.Thread(target=self.read_stream, 
                                                args=(self.process.stdout, "STDOUT"))
                 stderr_thread = threading.Thread(target=self.read_stream, 
                                                args=(self.process.stderr, "STDERR"))
                 
-                # Запускаем потоки
+                # Start threads
                 stdout_thread.daemon = True
                 stderr_thread.daemon = True
                 stdout_thread.start()
                 stderr_thread.start()
                 
-                # Явно сообщаем пользователю, что ожидаем ввода
+                # Explicitly inform user about waiting for input
                 QtCore.QMetaObject.invokeMethod(
                     self.log_window, 
                     "append_text", 
                     QtCore.Qt.QueuedConnection,
-                    QtCore.Q_ARG(str, "\n🎤 Процесс запущен. Нажмите и удерживайте Alt_R для записи речи.")
+                    QtCore.Q_ARG(str, "\n🎤 Process started. Press and hold Alt_R to record speech.")
                 )
                 
-                # Отслеживаем поток выполнения не блокируя основной поток
+                # Monitor execution flow without blocking main thread
                 monitor_thread = threading.Thread(target=self.monitor_process)
                 monitor_thread.daemon = True
                 monitor_thread.start()
@@ -217,14 +217,14 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                     self.log_window, 
                     "append_text", 
                     QtCore.Qt.QueuedConnection,
-                    QtCore.Q_ARG(str, "ОШИБКА: Процесс недоступен")
+                    QtCore.Q_ARG(str, "ERROR: Process unavailable")
                 )
         except Exception as e:
             QtCore.QMetaObject.invokeMethod(
                 self.log_window, 
                 "append_text", 
                 QtCore.Qt.QueuedConnection,
-                QtCore.Q_ARG(str, f"ОШИБКА чтения вывода: {str(e)}")
+                QtCore.Q_ARG(str, f"ERROR reading output: {str(e)}")
             )
             import traceback
             QtCore.QMetaObject.invokeMethod(
@@ -234,7 +234,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 QtCore.Q_ARG(str, traceback.format_exc())
             )
             
-        # В случае ошибки, мы все равно ждем завершения процесса
+        # In case of error, we still wait for process completion
         QtCore.QMetaObject.invokeMethod(
             self, 
             "process_finished", 
@@ -242,17 +242,17 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         )
             
     def monitor_process(self):
-        """Отслеживает процесс и вызывает обновление GUI при его завершении."""
+        """Monitors process and triggers GUI update upon completion."""
         if self.process:
             exit_code = self.process.wait()
             QtCore.QMetaObject.invokeMethod(
                 self.log_window, 
                 "append_text", 
                 QtCore.Qt.QueuedConnection,
-                QtCore.Q_ARG(str, f"Процесс завершился с кодом: {exit_code}")
+                QtCore.Q_ARG(str, f"Process completed with code: {exit_code}")
             )
             
-            # Обновляем GUI в главном потоке
+            # Update GUI in main thread
             QtCore.QMetaObject.invokeMethod(
                 self, 
                 "process_finished", 
@@ -260,18 +260,18 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             )
     
     def read_stream(self, stream, name):
-        """Читает поток (stdout или stderr) и отправляет данные в окно лога."""
+        """Reads stream (stdout or stderr) and sends data to log window."""
         try:
-            # Установим небуферизованное чтение для потока
+            # Set non-blocking reading for stream
             os.set_blocking(stream.fileno(), False)
             
             while self.process and self.process.poll() is None:
-                # Читаем доступные данные без блокировки
+                # Read available data without blocking
                 line = stream.readline()
                 if line:
-                    # Добавляем префикс к строке в зависимости от потока
+                    # Add prefix to line depending on stream
                     prefix = "[ERR] " if name == "STDERR" else ""
-                    # Отправляем строку в GUI поток
+                    # Send line to GUI thread
                     line_text = f"{prefix}{line.strip()}"
                     QtCore.QMetaObject.invokeMethod(
                         self.log_window, 
@@ -280,10 +280,10 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                         QtCore.Q_ARG(str, line_text)
                     )
                 else:
-                    # Если нет новых данных, даем процессору отдохнуть
+                    # If no new data, let CPU rest
                     QtCore.QThread.msleep(50)
             
-            # Вычитываем оставшиеся данные после завершения процесса
+            # Read remaining data after process completion
             for line in stream:
                 if line:
                     prefix = "[ERR] " if name == "STDERR" else ""
@@ -299,7 +299,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 self.log_window, 
                 "append_text", 
                 QtCore.Qt.QueuedConnection,
-                QtCore.Q_ARG(str, f"ОШИБКА чтения потока {name}: {str(e)}")
+                QtCore.Q_ARG(str, f"ERROR reading stream {name}: {str(e)}")
             )
     
     @QtCore.pyqtSlot()
@@ -307,16 +307,16 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         self.running = False
         self.start_remote_action.setEnabled(True)
         self.stop_action.setEnabled(False)
-        self.log_window.append_text("Процесс завершен.")
+        self.log_window.append_text("Process terminated.")
     
     def stop_whisper(self):
         if self.process and self.running:
             try:
-                self.log_window.append_text("Останавливаю процесс...")
+                self.log_window.append_text("Stopping process...")
                 
-                # Получаем ID всех дочерних процессов перед завершением основного
+                # Get all child process IDs before terminating the main process
                 try:
-                    # Находим все дочерние процессы
+                    # Find all child processes
                     child_pids = []
                     parent_pid = self.process.pid
                     ps_command = subprocess.run(
@@ -327,46 +327,46 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                     )
                     if ps_command.returncode == 0:
                         child_pids = [int(pid) for pid in ps_command.stdout.strip().split()]
-                        self.log_window.append_text(f"Найдены дочерние процессы: {child_pids}")
+                        self.log_window.append_text(f"Found child processes: {child_pids}")
                 except Exception as e:
-                    self.log_window.append_text(f"Ошибка при поиске дочерних процессов: {str(e)}")
+                    self.log_window.append_text(f"Error finding child processes: {str(e)}")
                 
-                # Отправляем SIGTERM главному процессу и даем ему шанс корректно завершиться
+                # Send SIGTERM to main process and give it a chance to terminate properly
                 os.kill(self.process.pid, signal.SIGTERM)
                 
-                # Ждем небольшое время для корректного завершения
-                max_wait = 3  # максимальное время ожидания в секундах
-                for _ in range(max_wait * 10):  # проверяем каждые 100 мс
-                    if self.process.poll() is not None:  # процесс завершился
-                        self.log_window.append_text(f"Процесс успешно завершен с кодом: {self.process.returncode}")
+                # Wait a short time for clean termination
+                max_wait = 3  # maximum wait time in seconds
+                for _ in range(max_wait * 10):  # check every 100 ms
+                    if self.process.poll() is not None:  # process terminated
+                        self.log_window.append_text(f"Process successfully terminated with code: {self.process.returncode}")
                         break
                     time.sleep(0.1)
                 
-                # Если процесс не завершился, принудительно завершаем его
+                # If process didn't terminate, force kill it
                 if self.process.poll() is None:
-                    self.log_window.append_text("Процесс не завершился корректно, принудительное завершение...")
+                    self.log_window.append_text("Process did not terminate properly, forcing termination...")
                     os.kill(self.process.pid, signal.SIGKILL)
-                    self.log_window.append_text("Процесс принудительно завершен")
+                    self.log_window.append_text("Process forcefully terminated")
                 
-                # Проверяем и убиваем все дочерние процессы, если они остались
+                # Check and kill all child processes if they remain
                 for pid in child_pids:
                     try:
-                        # Проверяем, существует ли процесс
-                        os.kill(pid, 0)  # 0 - просто проверка наличия процесса
-                        # Если процесс существует, принудительно завершаем его
-                        self.log_window.append_text(f"Принудительно завершаем дочерний процесс {pid}")
+                        # Check if process exists
+                        os.kill(pid, 0)  # 0 - just checking process existence
+                        # If process exists, force terminate it
+                        self.log_window.append_text(f"Forcefully terminating child process {pid}")
                         os.kill(pid, signal.SIGKILL)
                     except OSError:
-                        # Процесс уже не существует
+                        # Process no longer exists
                         pass
                 
-                # GUI обновляется в process_finished после завершения процесса
-                # Принудительно вызываем обработку завершения, если функция process_finished еще не сработала
+                # GUI is updated in process_finished after process termination
+                # Forcefully call termination handler if process_finished has not triggered yet
                 if self.running:
                     self.process_finished()
                 
             except Exception as e:
-                self.log_window.append_text(f"Ошибка при остановке: {str(e)}")
+                self.log_window.append_text(f"Error stopping process: {str(e)}")
                 import traceback
                 self.log_window.append_text(traceback.format_exc())
     
@@ -375,14 +375,14 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         self.log_window.raise_()
     
     def exit_app(self):
-        self.log_window.append_text("Завершение приложения...")
+        self.log_window.append_text("Exiting application...")
         
-        # Останавливаем процесс, если он запущен
+        # Stop process if running
         self.stop_whisper()
         
-        # Дополнительная проверка и завершение оставшихся процессов Python
+        # Additional check and termination of remaining Python processes
         try:
-            # Находим все процессы Python, связанные с нашим скриптом dictation.py
+            # Find all Python processes related to our dictation.py script
             ps_command = subprocess.run(
                 ["pgrep", "-f", "dictation.py"],
                 stdout=subprocess.PIPE,
@@ -391,26 +391,26 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             )
             if ps_command.returncode == 0:
                 leftover_pids = [int(pid) for pid in ps_command.stdout.strip().split()]
-                self.log_window.append_text(f"Найдены оставшиеся процессы dictation.py: {leftover_pids}")
+                self.log_window.append_text(f"Found remaining dictation.py processes: {leftover_pids}")
                 
-                # Принудительно завершаем оставшиеся процессы
+                # Forcefully terminate remaining processes
                 for pid in leftover_pids:
                     try:
-                        if pid != os.getpid():  # Не убиваем наш собственный процесс
-                            self.log_window.append_text(f"Принудительно завершаем процесс {pid}")
+                        if pid != os.getpid():  # Don't kill our own process
+                            self.log_window.append_text(f"Forcefully terminating process {pid}")
                             os.kill(pid, signal.SIGKILL)
                     except OSError:
                         pass
         except Exception as e:
-            self.log_window.append_text(f"Ошибка при завершении оставшихся процессов: {str(e)}")
+            self.log_window.append_text(f"Error terminating remaining processes: {str(e)}")
         
-        # Завершаем приложение
+        # Terminate application
         QtWidgets.QApplication.quit()
 
     def check_audio_devices(self):
-        """Проверяет доступность аудио устройств используя uv run"""
+        """Checks availability of audio devices using uv run"""
         try:
-            # Запускаем скрипт для получения аудио устройств
+            # Run script to get audio devices
             check_script = """
 import json
 import sounddevice as sd
@@ -428,28 +428,28 @@ print(json.dumps(sd.query_devices()))
                 import json
                 self.audio_devices = json.loads(stdout)
                 self.has_audio = True
-                self.log_window.append_text("✅ Доступ к аудио устройствам получен")
+                self.log_window.append_text("✅ Audio devices access successful")
                 
-                # Отображаем информацию об устройствах
+                # Display device information
                 input_devices = [d for d in self.audio_devices if d.get('max_input_channels', 0) > 0]
                 if input_devices:
-                    self.log_window.append_text(f"✅ Найдено {len(input_devices)} аудио устройств для записи")
+                    self.log_window.append_text(f"✅ Found {len(input_devices)} audio recording devices")
                     for i, device in enumerate(input_devices):
-                        self.log_window.append_text(f"    {i+1}. {device.get('name', 'Неизвестное устройство')}")
+                        self.log_window.append_text(f"    {i+1}. {device.get('name', 'Unknown device')}")
                 else:
-                    self.log_window.append_text("⚠️ Не найдено устройств для записи аудио. Проверьте микрофон.")
+                    self.log_window.append_text("⚠️ No recording devices found. Check your microphone.")
             else:
                 self.has_audio = False
                 self.audio_error = stderr
-                self.log_window.append_text(f"❌ Ошибка доступа к аудио: {stderr}")
+                self.log_window.append_text(f"❌ Audio access error: {stderr}")
         except Exception as e:
             self.has_audio = False
             self.audio_error = str(e)
-            self.log_window.append_text(f"❌ Исключение при проверке аудио: {str(e)}")
+            self.log_window.append_text(f"❌ Exception during audio check: {str(e)}")
 
     def load_settings(self):
-        """Загружает настройки из файла или возвращает значения по умолчанию"""
-        # Вспомогательная функция для безопасного логирования
+        """Loads settings from file or returns default values"""
+        # Helper function for safe logging
         def log_message(message):
             if hasattr(self, 'log_window') and self.log_window:
                 self.log_window.append_text(message)
@@ -463,44 +463,44 @@ print(json.dumps(sd.query_devices()))
                         content = f.read()
                         settings = json.loads(content)
                 except UnicodeDecodeError:
-                    # Пробуем с другой кодировкой, если utf-8 не сработал
+                    # Try with alternative encoding if utf-8 failed
                     with open(self.settings_path, 'r', encoding='latin-1') as f:
                         content = f.read()
                         settings = json.loads(content)
-                        log_message("⚠️ Файл настроек был прочитан с использованием альтернативной кодировки")
+                        log_message("⚠️ Settings file was read using alternative encoding")
                 
-                # Проверяем, что все необходимые ключи присутствуют
+                # Verify that all required keys are present
                 for key, value in DEFAULT_SETTINGS.items():
                     if key not in settings:
                         settings[key] = value
-                log_message(f"✅ Настройки загружены из {self.settings_path}")
-                log_message(f"   Температура: {settings.get('temperature', 0.2)}")
-                log_message(f"   Длина промпта: {len(settings.get('prompt', ''))}")
+                log_message(f"✅ Settings loaded from {self.settings_path}")
+                log_message(f"   Temperature: {settings.get('temperature', 0.2)}")
+                log_message(f"   Prompt length: {len(settings.get('prompt', ''))}")
                 return settings
             else:
-                log_message(f"⚠️ Файл настроек не найден: {self.settings_path}")
+                log_message(f"⚠️ Settings file not found: {self.settings_path}")
         except json.JSONDecodeError as je:
-            log_message(f"❌ Ошибка формата JSON в файле настроек: {str(je)}")
-            log_message(f"   Файл настроек будет переименован и создан новый")
-            # Если файл поврежден, переименовываем его и создаем новый
+            log_message(f"❌ JSON format error in settings file: {str(je)}")
+            log_message(f"   Settings file will be renamed and a new one created")
+            # If file is corrupted, rename it and create new one
             backup_path = f"{self.settings_path}.bak.{int(time.time())}"
             try:
                 os.rename(self.settings_path, backup_path)
-                log_message(f"✅ Резервная копия сохранена: {backup_path}")
+                log_message(f"✅ Backup saved: {backup_path}")
             except Exception as e:
-                log_message(f"❌ Не удалось создать резервную копию: {str(e)}")
+                log_message(f"❌ Failed to create backup: {str(e)}")
         except Exception as e:
-            log_message(f"❌ Ошибка при загрузке настроек: {str(e)}")
+            log_message(f"❌ Error loading settings: {str(e)}")
             import traceback
             log_message(traceback.format_exc())
         
-        # Возвращаем настройки по умолчанию в случае ошибки
-        log_message(f"ℹ️ Используются настройки по умолчанию")
+        # Return default settings in case of error
+        log_message(f"ℹ️ Using default settings")
         return DEFAULT_SETTINGS.copy()
     
     def save_settings(self):
-        """Сохраняет настройки в файл"""
-        # Вспомогательная функция для безопасного логирования
+        """Saves settings to file"""
+        # Helper function for safe logging
         def log_message(message):
             if hasattr(self, 'log_window') and self.log_window:
                 self.log_window.append_text(message)
@@ -508,114 +508,114 @@ print(json.dumps(sd.query_devices()))
                 print(message)
                 
         try:
-            # Проверяем права доступа к директории
+            # Check directory write permissions
             settings_dir = os.path.dirname(self.settings_path)
             if not os.access(settings_dir, os.W_OK):
-                log_message(f"❌ Нет прав на запись в директорию: {settings_dir}")
+                log_message(f"❌ No write permissions for directory: {settings_dir}")
                 return False
                 
-            # Сначала создаем временный файл для безопасного сохранения
+            # First create temporary file for safe saving
             temp_path = f"{self.settings_path}.tmp"
             with open(temp_path, 'w', encoding='utf-8') as f:
                 json_str = json.dumps(self.settings, ensure_ascii=False, indent=4)
                 f.write(json_str)
             
-            # Если временный файл успешно создан, переименовываем его
+            # If temp file was created successfully, rename it
             os.replace(temp_path, self.settings_path)
             
-            log_message(f"✅ Настройки сохранены в файл: {self.settings_path}")
-            log_message(f"   Температура: {self.settings.get('temperature', 0.2)}")
-            log_message(f"   Длина промпта: {len(self.settings.get('prompt', ''))}")
+            log_message(f"✅ Settings saved to file: {self.settings_path}")
+            log_message(f"   Temperature: {self.settings.get('temperature', 0.2)}")
+            log_message(f"   Prompt length: {len(self.settings.get('prompt', ''))}")
             return True
         except Exception as e:
-            log_message(f"❌ Ошибка при сохранении настроек: {str(e)}")
+            log_message(f"❌ Error saving settings: {str(e)}")
             import traceback
             log_message(traceback.format_exc())
             return False
             
     def show_settings(self):
-        """Показывает диалог настроек"""
-        # Вспомогательная функция для безопасного логирования
+        """Shows settings dialog"""
+        # Helper function for safe logging
         def log_message(message):
             if hasattr(self, 'log_window') and self.log_window:
                 self.log_window.append_text(message)
             else:
                 print(message)
                 
-        log_message("⚙️ Открываю диалог настроек...")
+        log_message("⚙️ Opening settings dialog...")
         settings_dialog = SettingsDialog(self.settings, self.parent_widget)
         if settings_dialog.exec_() == QtWidgets.QDialog.Accepted:
-            # Обновляем настройки
+            # Update settings
             old_settings = self.settings.copy()
             self.settings = settings_dialog.get_settings()
             
-            # Выводим информацию о новых настройках
-            log_message(f"ℹ️ Новые настройки:")
-            log_message(f"   Температура: {self.settings.get('temperature', 0.2)}")
-            log_message(f"   Длина промпта: {len(self.settings.get('prompt', ''))}")
+            # Output information about new settings
+            log_message(f"ℹ️ New settings:")
+            log_message(f"   Temperature: {self.settings.get('temperature', 0.2)}")
+            log_message(f"   Prompt length: {len(self.settings.get('prompt', ''))}")
             
-            # Сохраняем в файл
+            # Save to file
             if self.save_settings():
-                log_message("✅ Настройки сохранены успешно")
+                log_message("✅ Settings saved successfully")
                 
-                # Если процесс уже запущен, перезапускаем его с новыми настройками
+                # If process is already running, restart it with new settings
                 if self.running:
-                    log_message("🔄 Перезапуск процесса с новыми настройками...")
-                    # Останавливаем текущий процесс
+                    log_message("🔄 Restarting process with new settings...")
+                    # Stop current process
                     self.stop_whisper()
-                    # Запускаем процесс с новыми настройками
+                    # Start process with new settings
                     self.start_remote_whisper()
             else:
-                log_message("❌ Не удалось сохранить настройки")
+                log_message("❌ Failed to save settings")
 
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings.copy()
-        self.setWindowTitle("Настройки Whispex")
+        self.setWindowTitle("Whispex Settings")
         self.resize(700, 500)
         
-        # Устанавливаем иконку для окна настроек
+        # Set icon for settings window
         script_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(script_dir, "whispex.png")
         
         if os.path.exists(icon_path):
             self.setWindowIcon(QtGui.QIcon(icon_path))
         
-        # Создаем виджеты
+        # Create widgets
         layout = QtWidgets.QVBoxLayout()
         
-        # Температура
+        # Temperature
         temp_layout = QtWidgets.QHBoxLayout()
-        temp_label = QtWidgets.QLabel("Температура:")
+        temp_label = QtWidgets.QLabel("Temperature:")
         self.temp_spinbox = QtWidgets.QDoubleSpinBox()
         self.temp_spinbox.setMinimum(0.0)
         self.temp_spinbox.setMaximum(1.0)
         self.temp_spinbox.setSingleStep(0.1)
         self.temp_spinbox.setValue(settings.get('temperature', 0.2))
-        self.temp_spinbox.setToolTip("Значение от 0.0 до 1.0. Меньшие значения делают вывод более детерминированным.")
+        self.temp_spinbox.setToolTip("Value from 0.0 to 1.0. Lower values make output more deterministic.")
         temp_layout.addWidget(temp_label)
         temp_layout.addWidget(self.temp_spinbox)
         layout.addLayout(temp_layout)
         
-        # Промпт
-        prompt_label = QtWidgets.QLabel("Промпт для Whisper:")
+        # Prompt
+        prompt_label = QtWidgets.QLabel("Prompt for Whisper:")
         layout.addWidget(prompt_label)
         
         self.prompt_text = QtWidgets.QTextEdit()
         self.prompt_text.setPlainText(settings.get('prompt', DEFAULT_SETTINGS['prompt']))
         layout.addWidget(self.prompt_text)
         
-        # Кнопки
+        # Buttons
         button_layout = QtWidgets.QHBoxLayout()
         
-        reset_button = QtWidgets.QPushButton("Сбросить настройки")
+        reset_button = QtWidgets.QPushButton("Reset Settings")
         reset_button.clicked.connect(self.reset_settings)
         
-        apply_button = QtWidgets.QPushButton("Применить")
+        apply_button = QtWidgets.QPushButton("Apply")
         apply_button.clicked.connect(self.accept)
         
-        cancel_button = QtWidgets.QPushButton("Отмена")
+        cancel_button = QtWidgets.QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
         
         button_layout.addWidget(reset_button)
@@ -627,27 +627,27 @@ class SettingsDialog(QtWidgets.QDialog):
         self.setLayout(layout)
     
     def reset_settings(self):
-        """Сбрасывает настройки к значениям по умолчанию"""
+        """Resets settings to default values"""
         self.temp_spinbox.setValue(DEFAULT_SETTINGS.get('temperature', 0.2))
         self.prompt_text.setPlainText(DEFAULT_SETTINGS.get('prompt', ''))
     
     def get_settings(self):
-        """Возвращает текущие настройки из диалога"""
+        """Returns current settings from dialog"""
         settings = self.settings.copy()
         
-        # Получаем и проверяем температуру
+        # Get and verify temperature
         temperature = self.temp_spinbox.value()
         settings['temperature'] = temperature
         
-        # Получаем и проверяем промпт
+        # Get and verify prompt
         prompt = self.prompt_text.toPlainText()
-        # Проверяем, не пустой ли промпт
+        # Check if prompt is empty
         if not prompt.strip():
             prompt = DEFAULT_SETTINGS['prompt']
-            print(f"ВНИМАНИЕ: Промпт был пустым, использован промпт по умолчанию")
+            print(f"WARNING: Prompt was empty, using default prompt")
         settings['prompt'] = prompt
         
-        # Выводим отладочную информацию
+        # Output debug information
         print(f"DEBUG: get_settings -> temperature={temperature}, prompt_length={len(prompt)}")
         
         return settings
@@ -658,79 +658,79 @@ class LogWindow(QtWidgets.QDialog):
         self.setWindowTitle("Whispex")
         self.resize(700, 500)
         
-        # Устанавливаем иконку для окна лога
+        # Set icon for log window
         script_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(script_dir, "whispex.png")
         
         if os.path.exists(icon_path):
             self.setWindowIcon(QtGui.QIcon(icon_path))
         
-        # Инициализируем ссылку на tray_icon
+        # Initialize tray_icon reference
         self.tray_icon = None
         
-        # Создаем текстовый виджет для отображения лога
+        # Create text widget for displaying log
         self.log_text = QtWidgets.QTextEdit()
         self.log_text.setReadOnly(True)
         
-        # Создаем кнопки
+        # Create buttons
         button_layout = QtWidgets.QHBoxLayout()
         
-        clear_button = QtWidgets.QPushButton("Очистить лог")
+        clear_button = QtWidgets.QPushButton("Clear Log")
         clear_button.clicked.connect(self.clear_log)
         button_layout.addWidget(clear_button)
         
-        check_audio_button = QtWidgets.QPushButton("Проверить аудио")
+        check_audio_button = QtWidgets.QPushButton("Check Audio")
         check_audio_button.clicked.connect(self.parent_check_audio)
         button_layout.addWidget(check_audio_button)
         
-        # Добавляем кнопку настроек
-        settings_button = QtWidgets.QPushButton("Настройки")
+        # Add settings button
+        settings_button = QtWidgets.QPushButton("Settings")
         settings_button.clicked.connect(self.show_settings)
         button_layout.addWidget(settings_button)
         
-        # Добавляем кнопки управления
-        start_button = QtWidgets.QPushButton("Запустить")
+        # Add control buttons
+        start_button = QtWidgets.QPushButton("Start")
         start_button.clicked.connect(self.start_service)
         button_layout.addWidget(start_button)
         
-        stop_button = QtWidgets.QPushButton("Остановить")
+        stop_button = QtWidgets.QPushButton("Stop")
         stop_button.clicked.connect(self.stop_service)
         button_layout.addWidget(stop_button)
         
-        # Создаем компоновку
+        # Create layout
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.log_text)
         layout.addLayout(button_layout)
         self.setLayout(layout)
     
     def parent_check_audio(self):
-        # Обращаемся к tray_icon вместо parent
+        # Access tray_icon instead of parent
         if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'check_audio_devices'):
-            self.append_text("🔍 Повторная проверка аудио устройств...")
+            self.append_text("🔍 Re-checking audio devices...")
             self.tray_icon.check_audio_devices()
     
     def start_service(self):
-        # Запускаем сервис через tray_icon
+        # Start service through tray_icon
         if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'start_remote_whisper'):
-            self.append_text("🚀 Запуск службы распознавания...")
+            self.append_text("🚀 Starting recognition service...")
             self.tray_icon.start_remote_whisper()
     
     def stop_service(self):
-        # Останавливаем сервис через tray_icon
+        # Stop service through tray_icon
         if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'stop_whisper'):
-            self.append_text("🛑 Остановка службы распознавания...")
+            self.append_text("🛑 Stopping recognition service...")
             self.tray_icon.stop_whisper()
     
     def show_settings(self):
-        # Показываем настройки через tray_icon
+        # Show settings through tray_icon
         if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'show_settings'):
-            self.append_text("⚙️ Открываю настройки...")
+            self.append_text("⚙️ Opening settings...")
             self.tray_icon.show_settings()
     
     @QtCore.pyqtSlot(str)
     def append_text(self, text):
         self.log_text.append(text)
-        # Прокручиваем вниз
+        # Scroll down
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
     
@@ -739,33 +739,33 @@ class LogWindow(QtWidgets.QDialog):
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)  # Не закрывать приложение при закрытии окон
+    app.setQuitOnLastWindowClosed(False)  # Don't close app when windows are closed
     
-    # Создаем невидимое главное окно для поддержки работы в трее
+    # Create invisible main window for tray support
     main_widget = QtWidgets.QWidget()
     
     tray_icon = WhisperTrayIcon(main_widget)
     tray_icon.show()
     
-    # Показываем окно лога при запуске для отображения статуса
+    # Show log window at startup to display status
     tray_icon.log_window.show()
-    tray_icon.log_window.append_text("ℹ️ Используется uv для запуска Python-скриптов")
+    tray_icon.log_window.append_text("ℹ️ Using uv to run Python scripts")
     
-    # Проверяем аудио устройства
+    # Check audio devices
     tray_icon.check_audio_devices()
     
-    # Показываем сообщение при запуске
+    # Show message at startup
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whispex.png")
     notification_icon = QtGui.QIcon(icon_path) if os.path.exists(icon_path) else QtGui.QIcon.fromTheme("audio-input-microphone")
     
     tray_icon.showMessage(
         "Whispex", 
-        "Приложение запущено в системном трее", 
+        "Application running in system tray", 
         notification_icon, 
         3000
     )
     
-    # Автоматически запускаем службу распознавания после загрузки приложения
+    # Automatically start recognition service after app loads
     QtCore.QTimer.singleShot(1000, lambda: tray_icon.start_remote_whisper())
     
     sys.exit(app.exec_()) 

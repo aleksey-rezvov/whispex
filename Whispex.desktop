@@ -2,8 +2,8 @@
 Type=Application
 Name=Whispex
 GenericName=Speech Recognition
-Comment=Служба распознавания речи OpenAI Whisper
-Exec=/home/arezvov/projects/ais/whispex/whisper_tray.py
+Comment=OpenAI Whisper Speech Recognition Service
+Exec=/home/arezvov/projects/ais/whispex/whispex-tray.py
 Icon=/home/arezvov/projects/ais/whispex/whispex.png
 Terminal=false
 Categories=Audio;Utility;AudioVideo;

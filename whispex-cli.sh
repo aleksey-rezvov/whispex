@@ -4,77 +4,77 @@ script_path="$(realpath "$0")"
 script_dir="$(dirname "$script_path")"
 cd $script_dir
 
-# Отключаем буферизацию Python
+# Disable Python buffering
 export PYTHONUNBUFFERED=1
 
-# Функция для показа справки
+# Help function
 show_help() {
-    echo "Использование: $0 [опции]"
+    echo "Usage: $0 [options]"
     echo ""
-    echo "Опции:"
-    echo "  --gui                   Запустить графический интерфейс (whispex-tray.py)"
-    echo "  --nogui                 Запустить без графического интерфейса (dictation.py)"
-    echo "  --help                  Показать эту справку"
+    echo "Options:"
+    echo "  --gui                   Start graphical interface (whispex-tray.py)"
+    echo "  --nogui                 Start without graphical interface (dictation.py)"
+    echo "  --help                  Show this help"
     echo ""
 }
 
-# Функция для обработки сигналов завершения
+# Signal handling function for clean termination
 cleanup() {
-    echo "Получен сигнал завершения, останавливаем процесс..."
-    # Отправляем SIGTERM нашему процессу
+    echo "Termination signal received, stopping process..."
+    # Send SIGTERM to our process
     kill -TERM $PYTHON_PID 2>/dev/null
     
-    # Даем немного времени на корректное завершение
+    # Give some time for clean termination
     sleep 0.5
     
-    # Если процесс не завершился, принудительно его завершаем
+    # If the process didn't terminate, force kill it
     if kill -0 $PYTHON_PID 2>/dev/null; then
-        echo "Процесс не завершился, принудительная остановка..."
+        echo "Process didn't terminate, force killing..."
         kill -KILL $PYTHON_PID 2>/dev/null
     fi
     
     exit 0
 }
 
-# Проверяем аргументы
+# Check arguments
 RUN_GUI=false
 
-# Проверяем первый аргумент
+# Check first argument
 if [ $# -eq 0 ]; then
-    # Если нет аргументов, по умолчанию запускаем без GUI
+    # If no arguments, run without GUI by default
     RUN_GUI=false
 elif [ "$1" == "--help" ]; then
     show_help
     exit 0
 elif [ "$1" == "--gui" ]; then
     RUN_GUI=true
-    shift  # Удаляем первый аргумент
+    shift  # Remove first argument
 elif [ "$1" == "--nogui" ]; then
     RUN_GUI=false
-    shift  # Удаляем первый аргумент
+    shift  # Remove first argument
 else
-    # Если первый аргумент не является флагом --gui, запускаем без GUI
+    # If first argument is not --gui flag, run without GUI
     RUN_GUI=false
 fi
 
-# Перехватываем сигналы завершения для корректной очистки
+# Catch termination signals for clean cleanup
 trap cleanup SIGINT SIGTERM
 
 if [ "$RUN_GUI" = true ]; then
-    echo "Запускаем графический интерфейс..."
-    # Используем uv run вместо прямого запуска Python
+    echo "Starting graphical interface..."
+    # Use uv run instead of direct Python execution
     stdbuf -o0 -e0 uv run @uv whispex-tray.py &
     PYTHON_PID=$!
 else
-    echo "Запускаем dictation.py..."
-    # Используем uv run вместо прямого запуска Python
+    echo "Starting dictation.py..."
+    # Use uv run instead of direct Python execution
     stdbuf -o0 -e0 uv run @uv dictation.py &
     PYTHON_PID=$!
 fi
 
-# Ждем завершения Python процесса
+# Wait for Python process to complete
 wait $PYTHON_PID
 EXIT_CODE=$?
 
-# Выходим с тем же кодом, что и Python
+# Exit with the same code as Python
 exit $EXIT_CODE
