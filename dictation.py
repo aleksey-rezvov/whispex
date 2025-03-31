@@ -5,6 +5,7 @@ import time
 import signal
 import sys
 import tempfile
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,9 +14,44 @@ import pyperclip
 import sounddevice as sd
 import soundfile
 from openai import OpenAI
+import tomli
 
-# ! you can change this rec_key value
-rec_key = pynput.keyboard.Key.alt_r
+# Функция для получения пути к файлу конфигурации
+def get_config_path():
+    # Путь к пользовательскому конфигу
+    user_config_dir = Path.home() / ".config" / "whispex"
+    user_config_path = user_config_dir / "config.toml"
+    
+    # Путь к конфигу по умолчанию в директории приложения
+    script_dir = Path(__file__).parent
+    default_config_path = script_dir / "default_config.toml"
+    
+    # Проверяем, существует ли пользовательский конфиг
+    if user_config_path.exists():
+        return user_config_path
+    else:
+        # Если нет пользовательского конфига, используем дефолтный
+        if default_config_path.exists():
+            return default_config_path
+        else:
+            print(f"Ошибка: Не найден файл конфигурации. Ни {user_config_path}, ни {default_config_path} не существуют.")
+            sys.exit(1)
+
+# Загрузка конфигурации
+def load_config():
+    config_path = get_config_path()
+    print(f"Загрузка конфигурации из: {config_path}")
+    
+    try:
+        with open(config_path, "rb") as f:
+            return tomli.load(f)
+    except Exception as e:
+        print(f"Ошибка при чтении конфигурации: {e}")
+        sys.exit(1)
+
+# Загружаем конфигурацию
+config = load_config()
+print("Настройки из файла конфигурации могут быть перезаписаны параметрами командной строки.")
 
 # Переопределяем стандартный print для автоматического сброса буфера
 original_print = print
@@ -38,20 +74,48 @@ When uncertain about a word or phrase, prioritize technical meaning over common 
 whisper_samplerate = 16000  # sampling rate that whisper uses
 recording_samplerate = 48000  # multiple of whisper_samplerate, widely supported
 
+# Преобразование строки клавиши в объект Key
+def get_key_from_string(key_str):
+    if key_str == "alt_r":
+        return pynput.keyboard.Key.alt_r
+    elif key_str == "alt_l":
+        return pynput.keyboard.Key.alt_l
+    elif key_str == "ctrl_r":
+        return pynput.keyboard.Key.ctrl_r
+    elif key_str == "ctrl_l":
+        return pynput.keyboard.Key.ctrl_l
+    # Добавьте другие специальные клавиши по необходимости
+    else:
+        return key_str  # Для обычных клавиш
+
+# Настройки из конфига с дефолтными значениями
+rec_key = get_key_from_string(config.get("general", {}).get("rec_key", "alt_r"))
+default_language = config.get("general", {}).get("language", "en")
+default_temperature = config.get("whisper", {}).get("temperature", 0.2)
+openai_api_key = config.get("openai", {}).get("api_key", None)
+input_method = config.get("general", {}).get("input_method", "clipboard_ctrl_shift_v")
+prompt_text = config.get("whisper", {}).get("prompt", DEFAULT_PROMPT)
+
 controller = pynput.keyboard.Controller()
 
 # Parse arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("language", nargs="?", default=None, help="Language code for transcription (e.g. 'ru', 'en')")
-parser.add_argument("--no-type-using-clipboard", action="store_true", help="Don't use clipboard for typing")
+parser.add_argument("language", nargs="?", default=default_language, help="Language code for transcription (e.g. 'ru', 'en')")
+parser.add_argument("--no-type", action="store_true", help="Don't type anything")
 parser.add_argument("--on-callback", type=str, default=None, help="Command to run after initialization")
 parser.add_argument("--auto-off-time", type=int, default=None, help="Automatically turn off after N seconds of inactivity")
-parser.add_argument("--temperature", type=float, default=0.2, help="Temperature parameter for Whisper model (default: 0.2)")
+parser.add_argument("--temperature", type=float, default=default_temperature, help=f"Temperature parameter for Whisper model (default: {default_temperature})")
 parser.add_argument("--prompt", type=str, default=None, help="Custom prompt for Whisper model (use @filepath to load from file)")
 args = parser.parse_args()
 
+# Проверка наличия API ключа
+if not openai_api_key and not os.environ.get("OPENAI_API_KEY"):
+    print("ВНИМАНИЕ: API ключ OpenAI не указан ни в конфигурации, ни в переменной окружения OPENAI_API_KEY")
+    print("Работа с OpenAI API будет невозможна без действительного ключа.")
+    print("Добавьте ключ в ~/.config/whispex/config.toml или установите переменную окружения OPENAI_API_KEY")
+
 # Initialize OpenAI client
-client = OpenAI()
+client = OpenAI(api_key=openai_api_key)
 
 # Проверяем, передан ли prompt через файл
 prompt_arg = args.prompt
@@ -66,7 +130,7 @@ if prompt_arg and prompt_arg.startswith('@'):
         args.prompt = None
 
 # Set the prompt from command line or use default
-DEV_PROMPT = args.prompt if args.prompt else DEFAULT_PROMPT
+DEV_PROMPT = args.prompt if args.prompt else prompt_text
 
 if args.on_callback is not None:
     subprocess.run(args.on_callback, shell=True)
@@ -99,15 +163,29 @@ def get_text(audio, context=None):
     return result_text
 
 
-def type_using_clipboard(text):
-    # use pynput to type ctrl+shift+v
-    pyperclip.copy(text)
-    controller.press(pynput.keyboard.Key.ctrl_l)
-    controller.press(pynput.keyboard.Key.shift_l)
-    controller.press("v")
-    controller.release("v")
-    controller.release(pynput.keyboard.Key.shift_l)
-    controller.release(pynput.keyboard.Key.ctrl_l)
+def type_text(text):
+    if args.no_type:
+        return
+    
+    if input_method == "clipboard_ctrl_v":
+        pyperclip.copy(text)
+        controller.press(pynput.keyboard.Key.ctrl_l)
+        controller.press("v")
+        controller.release("v")
+        controller.release(pynput.keyboard.Key.ctrl_l)
+    elif input_method == "clipboard_ctrl_shift_v":
+        pyperclip.copy(text)
+        controller.press(pynput.keyboard.Key.ctrl_l)
+        controller.press(pynput.keyboard.Key.shift_l)
+        controller.press("v")
+        controller.release("v")
+        controller.release(pynput.keyboard.Key.shift_l)
+        controller.release(pynput.keyboard.Key.ctrl_l)
+    elif input_method == "direct":
+        controller.type(text)
+    else:
+        print(f"Неизвестный метод ввода: {input_method}. Использую прямой ввод.")
+        controller.type(text)
 
 
 rec_key_pressed = False
@@ -157,10 +235,7 @@ def record_and_process():
 
     # Ввод текста
     text = text + " "
-    if not args.no_type_using_clipboard:
-        type_using_clipboard(text)
-    else:
-        controller.type(text)
+    type_text(text)
 
 
 def on_press(key):
@@ -181,10 +256,11 @@ def on_release(key):
 
 
 # Вывод информации о настройках
-if args.language is not None:
-    print(f"Using language: {args.language}")
-print(f"Using temperature: {args.temperature}")
-print(f"Using development prompt: {DEV_PROMPT[:50]}...")
+print(f"Используемый язык: {args.language}")
+print(f"Температура модели: {args.temperature}")
+print(f"Клавиша записи: {rec_key}")
+print(f"Метод ввода: {input_method}")
+print(f"Промпт: {DEV_PROMPT[:50]}...")
 
 # Добавляем обработчик сигналов для корректного завершения
 def signal_handler(sig, frame):
@@ -208,7 +284,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-    print(f"Press {rec_key} to start recording")
+    print(f"Нажмите {rec_key} для начала записи")
     try:
         while listener.is_alive():
             if args.auto_off_time is not None and time.time() - time_last_used > args.auto_off_time:
@@ -216,7 +292,7 @@ with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as liste
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nExiting...")
+        print("\nВыход...")
         
 # Явное закрытие всех потоков перед выходом
 if 'listener' in globals() and listener:

@@ -6,7 +6,47 @@ import subprocess
 import threading
 import time
 import json
+from pathlib import Path
+import tomli
 from PyQt5 import QtWidgets, QtGui, QtCore
+
+# Загрузка конфигурации из TOML
+def get_config_path():
+    # Путь к пользовательскому конфигу
+    user_config_dir = Path.home() / ".config" / "whispex"
+    user_config_path = user_config_dir / "config.toml"
+    
+    # Путь к конфигу по умолчанию в директории приложения
+    script_dir = Path(__file__).parent
+    default_config_path = script_dir / "default_config.toml"
+    
+    # Проверяем, существует ли пользовательский конфиг
+    if user_config_path.exists():
+        return user_config_path
+    else:
+        # Если нет пользовательского конфига, используем дефолтный
+        if default_config_path.exists():
+            return default_config_path
+        else:
+            print(f"Ошибка: Не найден файл конфигурации. Ни {user_config_path}, ни {default_config_path} не существуют.")
+            return None
+
+def load_config():
+    config_path = get_config_path()
+    if not config_path:
+        return {}
+    
+    print(f"Загрузка конфигурации из: {config_path}")
+    
+    try:
+        with open(config_path, "rb") as f:
+            return tomli.load(f)
+    except Exception as e:
+        print(f"Ошибка при чтении конфигурации: {e}")
+        return {}
+
+# Загружаем настройки из TOML
+config = load_config()
 
 # Константы
 DEFAULT_SETTINGS = {
@@ -41,11 +81,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         # Сохраняем родительский виджет
         self.parent_widget = parent
         
-        # Проверяем наличие виртуального окружения
-        self.venv_python = os.path.join(script_dir, "venv/bin/python3")
-        self.venv_pip = os.path.join(script_dir, "venv/bin/pip")
-        self.has_venv = os.path.exists(self.venv_python)
-        
         # Проверка аудио устройств будет после меню
         self.has_audio = False
         self.audio_devices = []
@@ -54,10 +89,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         self.log_window = LogWindow(self.parent_widget)
         # Устанавливаем обратную связь
         self.log_window.tray_icon = self
-        
-        # Загружаем настройки после создания log_window
-        self.settings_path = os.path.join(script_dir, "whispex_settings.json")
-        self.settings = self.load_settings()
         
         # Создаем меню
         self.menu = QtWidgets.QMenu()
@@ -96,13 +127,12 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         
     def start_remote_whisper(self):
         if not self.running:
-            self.start_whisper("run_dictation_remote.sh")
+            self.start_whisper("dictation.py")
     
     def start_whisper(self, script_name):
         self.log_window.append_text(f"Запускаю {script_name}...")
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(script_dir, script_name)
         
         # Настраиваем окружение для запуска скрипта
         env = os.environ.copy()
@@ -110,39 +140,14 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         # Отключаем буферизацию Python вывода
         env['PYTHONUNBUFFERED'] = '1'
         
-        # Если это удаленный скрипт, добавляем OPENAI_API_KEY из файла
-        if 'remote' in script_name:
-            try:
-                openai_token_path = os.path.expanduser("~/.config/openai.token")
-                if os.path.exists(openai_token_path):
-                    with open(openai_token_path, 'r') as token_file:
-                        env['OPENAI_API_KEY'] = token_file.read().strip()
-                        self.log_window.append_text(f"OpenAI API ключ загружен")
-                else:
-                    self.log_window.append_text(f"ОШИБКА: Файл OpenAI API ключа не найден: {openai_token_path}")
-            except Exception as e:
-                self.log_window.append_text(f"ОШИБКА при чтении OpenAI API ключа: {str(e)}")
-        
         try:
-            # Запускаем через bash для правильной обработки переменных окружения и shell-специфичных команд
-            self.log_window.append_text(f"Выполняю bash скрипт: {script_path}")
+            # Выполняем скрипт через uv run
+            self.log_window.append_text(f"Выполняю скрипт через uv: {script_name}")
             
-            # Подготовим аргументы командной строки
-            command = ["/bin/bash", script_path, "ru"]
+            # Запускаем скрипт с помощью uv run @uv
+            command = ["uv", "run", "@uv", script_name]
             
-            # Добавляем параметр температуры
-            temperature = self.settings.get('temperature', 0.2)
-            command.append(f"--temperature={temperature}")
-            
-            # Добавляем параметр промпта
-            # Сначала сохраняем промпт во временный файл для избежания проблем с передачей длинного текста
-            prompt_file = os.path.join(script_dir, ".whisper_prompt.tmp")
-            with open(prompt_file, 'w', encoding='utf-8') as f:
-                f.write(self.settings.get('prompt', DEFAULT_SETTINGS['prompt']))
-            
-            command.append(f"--prompt=@{prompt_file}")
-            
-            self.log_window.append_text(f"Команда запуска: {' '.join(command[:3])} [параметры опущены]")
+            self.log_window.append_text(f"Команда запуска: {' '.join(command)}")
             
             self.process = subprocess.Popen(
                 command,
@@ -402,67 +407,8 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         # Завершаем приложение
         QtWidgets.QApplication.quit()
 
-    def check_and_install_dependencies(self):
-        """Проверяет и устанавливает недостающие зависимости в venv."""
-        
-        if not self.has_venv:
-            self.log_window.append_text("❌ Виртуальное окружение не найдено, не могу установить зависимости")
-            return False
-        
-        required_packages = ['sounddevice', 'openai', 'numpy']
-        missing_packages = []
-        
-        # Проверяем каждый пакет
-        for package in required_packages:
-            try:
-                # Пытаемся импортировать пакет через venv python
-                proc = subprocess.Popen(
-                    [self.venv_python, "-c", f"import {package}"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True
-                )
-                _, stderr = proc.communicate()
-                if proc.returncode != 0:
-                    self.log_window.append_text(f"⚠️ Пакет {package} не найден в venv")
-                    missing_packages.append(package)
-                else:
-                    self.log_window.append_text(f"✅ Пакет {package} найден")
-            except Exception as e:
-                self.log_window.append_text(f"❌ Ошибка при проверке пакета {package}: {str(e)}")
-                missing_packages.append(package)
-        
-        # Устанавливаем недостающие пакеты
-        if missing_packages:
-            self.log_window.append_text(f"Устанавливаю недостающие пакеты: {', '.join(missing_packages)}")
-            for package in missing_packages:
-                try:
-                    self.log_window.append_text(f"📦 Установка {package}...")
-                    proc = subprocess.Popen(
-                        [self.venv_pip, "install", package],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        universal_newlines=True
-                    )
-                    stdout, stderr = proc.communicate()
-                    if proc.returncode == 0:
-                        self.log_window.append_text(f"✅ Пакет {package} успешно установлен")
-                    else:
-                        self.log_window.append_text(f"❌ Ошибка установки {package}: {stderr}")
-                except Exception as e:
-                    self.log_window.append_text(f"❌ Исключение при установке {package}: {str(e)}")
-        
-        # Проверяем аудио после всех установок
-        self.check_audio_devices()
-        return len(missing_packages) == 0
-    
     def check_audio_devices(self):
-        """Проверяет доступность аудио устройств используя venv."""
-        if not self.has_venv:
-            self.log_window.append_text("❌ Виртуальное окружение не найдено, не могу проверить аудио")
-            self.has_audio = False
-            return
-        
+        """Проверяет доступность аудио устройств используя uv run"""
         try:
             # Запускаем скрипт для получения аудио устройств
             check_script = """
@@ -471,7 +417,7 @@ import sounddevice as sd
 print(json.dumps(sd.query_devices()))
 """
             proc = subprocess.Popen(
-                [self.venv_python, "-c", check_script],
+                ["uv", "run", "@uv", "-c", check_script],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True
@@ -483,6 +429,15 @@ print(json.dumps(sd.query_devices()))
                 self.audio_devices = json.loads(stdout)
                 self.has_audio = True
                 self.log_window.append_text("✅ Доступ к аудио устройствам получен")
+                
+                # Отображаем информацию об устройствах
+                input_devices = [d for d in self.audio_devices if d.get('max_input_channels', 0) > 0]
+                if input_devices:
+                    self.log_window.append_text(f"✅ Найдено {len(input_devices)} аудио устройств для записи")
+                    for i, device in enumerate(input_devices):
+                        self.log_window.append_text(f"    {i+1}. {device.get('name', 'Неизвестное устройство')}")
+                else:
+                    self.log_window.append_text("⚠️ Не найдено устройств для записи аудио. Проверьте микрофон.")
             else:
                 self.has_audio = False
                 self.audio_error = stderr
@@ -728,10 +683,6 @@ class LogWindow(QtWidgets.QDialog):
         check_audio_button.clicked.connect(self.parent_check_audio)
         button_layout.addWidget(check_audio_button)
         
-        check_deps_button = QtWidgets.QPushButton("Проверить зависимости")
-        check_deps_button.clicked.connect(self.parent_check_deps)
-        button_layout.addWidget(check_deps_button)
-        
         # Добавляем кнопку настроек
         settings_button = QtWidgets.QPushButton("Настройки")
         settings_button.clicked.connect(self.show_settings)
@@ -757,12 +708,6 @@ class LogWindow(QtWidgets.QDialog):
         if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'check_audio_devices'):
             self.append_text("🔍 Повторная проверка аудио устройств...")
             self.tray_icon.check_audio_devices()
-    
-    def parent_check_deps(self):
-        # Обращаемся к tray_icon вместо parent
-        if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'check_and_install_dependencies'):
-            self.append_text("🔍 Повторная проверка зависимостей...")
-            self.tray_icon.check_and_install_dependencies()
     
     def start_service(self):
         # Запускаем сервис через tray_icon
@@ -804,28 +749,10 @@ if __name__ == "__main__":
     
     # Показываем окно лога при запуске для отображения статуса
     tray_icon.log_window.show()
-    if tray_icon.has_venv:
-        tray_icon.log_window.append_text("✅ Виртуальное окружение найдено: " + tray_icon.venv_python)
-        # Проверяем и устанавливаем зависимости
-        tray_icon.log_window.append_text("🔍 Проверка необходимых зависимостей...")
-        tray_icon.check_and_install_dependencies()
-    else:
-        tray_icon.log_window.append_text("❌ ОШИБКА: Виртуальное окружение не найдено!")
-        tray_icon.log_window.append_text("    Необходимо для работы: " + os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv/bin/python3"))
+    tray_icon.log_window.append_text("ℹ️ Используется uv для запуска Python-скриптов")
     
     # Проверяем аудио устройства
-    if tray_icon.has_audio:
-        input_devices = [d for d in tray_icon.audio_devices if d.get('max_input_channels', 0) > 0]
-        if input_devices:
-            tray_icon.log_window.append_text(f"✅ Найдено {len(input_devices)} аудио устройств для записи")
-            for i, device in enumerate(input_devices):
-                tray_icon.log_window.append_text(f"    {i+1}. {device.get('name', 'Неизвестное устройство')}")
-        else:
-            tray_icon.log_window.append_text("⚠️ Не найдено устройств для записи аудио. Проверьте микрофон.")
-    else:
-        tray_icon.log_window.append_text("⚠️ Аудио устройства не обнаружены. Это нормально если они будут доступны скрипту dictation.py.")
-        if hasattr(tray_icon, 'audio_error'):
-            tray_icon.log_window.append_text(f"    Детали ошибки: {tray_icon.audio_error}")
+    tray_icon.check_audio_devices()
     
     # Показываем сообщение при запуске
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whispex.png")

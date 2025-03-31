@@ -1,0 +1,15 @@
+[project]
+name = "whispex"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.2.4",
+    "openai>=1.69.0",
+    "pynput>=1.8.1",
+    "pyperclip>=1.9.0",
+    "pyqt5>=5.15.11",
+    "sounddevice>=0.5.1",
+    "soundfile>=0.13.1",
+]
