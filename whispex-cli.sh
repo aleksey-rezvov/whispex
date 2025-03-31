@@ -6,7 +6,6 @@ script_dir="$(dirname "$script_path")"
 # Disable Python buffering
 export PYTHONUNBUFFERED=1
 
-# Help function
 show_help() {
     echo "Usage: $0 [--help]"
     echo ""
@@ -21,19 +20,15 @@ show_help() {
     echo ""
 }
 
-# Check if help is requested
 if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     show_help
     exit 0
 fi
 
-# Direct execution of dictation.py in blocking mode without any arguments
 echo "Starting whispex.py..."
-echo "Attempting to load settings from configuration file..."
 
 # Clear VIRTUAL_ENV to avoid warnings about environment mismatch
-unset VIRTUAL_ENV
+# unset VIRTUAL_ENV
 
-# Run dictation.py with proper path and uv context
 SCRIPT_PATH="${script_dir}/whispex.py"
 exec uv run "${SCRIPT_PATH}"

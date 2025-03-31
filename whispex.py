@@ -45,6 +45,7 @@ class AppState:
     time_last_used: float = field(default_factory=time.time)
     stream: Optional[sd.InputStream] = None  # Audio stream
     controller: Optional[pynput.keyboard.Controller] = None  # Keyboard controller
+    signal_handler_running: bool = False  # Flag to prevent multiple signal handler executions
 
 # Create a singleton instance
 app_state = AppState()
@@ -379,9 +380,6 @@ def terminate_process_tree(pid, timeout=3):
     except Exception as e:
         logger.error(f"Error terminating process tree: {e}")
 
-# Flag to prevent multiple signal handler executions
-signal_handler_running = False
-
 def signal_handler(sig, frame):
     """
     Handle termination signals with proper cleanup.
@@ -390,13 +388,11 @@ def signal_handler(sig, frame):
         sig: Signal number
         frame: Current stack frame
     """
-    global signal_handler_running
-    
     # Prevent multiple executions of signal handler
-    if signal_handler_running:
+    if app_state.signal_handler_running:
         return
     
-    signal_handler_running = True
+    app_state.signal_handler_running = True
     logger.info(f"Received signal {sig}, proper termination...")
     
     # First stop any recording in progress
