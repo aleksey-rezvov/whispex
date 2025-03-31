@@ -29,7 +29,7 @@ fi
 
 # Direct execution of dictation.py in blocking mode without any arguments
 echo "Starting dictation.py..."
-echo "All settings are loaded from the configuration file."
+echo "Attempting to load settings from configuration file..."
 
 # Clear VIRTUAL_ENV to avoid warnings about environment mismatch
 unset VIRTUAL_ENV

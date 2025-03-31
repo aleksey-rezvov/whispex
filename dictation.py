@@ -125,9 +125,10 @@ def load_config():
                 config["openai"]["api_key"] = env_api_key
                 logger.info("Using OpenAI API key from environment variables")
             else:
-                logger.warning("OpenAI API key is not specified either in the configuration or in OPENAI_API_KEY environment variable")
-                logger.warning("Working with OpenAI API will not be possible without a valid key")
-                logger.warning("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
+                logger.error("OpenAI API key is not specified either in the configuration or in OPENAI_API_KEY environment variable")
+                logger.error("Working with OpenAI API is not possible without a valid key")
+                logger.error("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
+                sys.exit(1)
         
         return config
     except Exception as e:
@@ -374,10 +375,11 @@ def signal_handler(sig, frame):
     
     # Find and terminate processes related to this application
     try:
-        # Try to terminate our own process tree
+        # Clean up our own process tree first (just children)
         terminate_process_tree(current_pid)
         
         # Look for other instances of dictation.py that might be orphaned
+        # but don't include our own process
         output = subprocess.run(
             ["pgrep", "-f", "dictation.py"],
             stdout=subprocess.PIPE,
@@ -387,7 +389,7 @@ def signal_handler(sig, frame):
         if output.returncode == 0:
             for pid_str in output.stdout.strip().split():
                 pid = int(pid_str)
-                if pid != current_pid:  # Don't terminate ourselves
+                if pid != current_pid:  # Don't terminate ourselves again
                     logger.info(f"Found other dictation.py process: {pid}, terminating...")
                     terminate_process_tree(pid)
     except Exception as e:
@@ -405,6 +407,35 @@ def terminate_process_tree(pid, timeout=3):
         timeout (int, optional): Seconds to wait for graceful termination before force kill
     """
     try:
+        # Skip if trying to terminate our own process, just kill the children
+        # This avoids recursion when called from signal_handler
+        current_pid = os.getpid()
+        if pid == current_pid:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            
+            # Log children to terminate
+            if children:
+                logger.info(f"Terminating {len(children)} child processes...")
+                for child in children:
+                    try:
+                        if child.is_running():
+                            logger.info(f"Sending SIGTERM to child process {child.pid}...")
+                            child.terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                
+                # Wait for children to terminate and kill if necessary
+                gone, alive = psutil.wait_procs(children, timeout=timeout)
+                for child in alive:
+                    try:
+                        logger.warning(f"Force killing child process {child.pid}...")
+                        child.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            return
+        
+        # For other processes, terminate both parent and children
         parent = psutil.Process(pid)
         children = parent.children(recursive=True)
         
