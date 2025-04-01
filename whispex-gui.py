@@ -1,3 +1,4 @@
+import logging
 import os
 import signal
 import subprocess
@@ -45,6 +46,9 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         # Set feedback reference
         self.log_window.tray_icon = self
 
+        # Connect activated signal to handle tray icon clicks
+        self.activated.connect(self.on_tray_activated)
+
         # Initialize settings manager
         self.settings_manager = SettingsManager()
 
@@ -64,7 +68,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         self.stop_action.setEnabled(False)
 
         # Add log view action
-        self.log_action = self.menu.addAction("Show Log")
+        self.log_action = self.menu.addAction("Open Main Window")
         self.log_action.triggered.connect(self.show_log)
 
         # Add settings action
@@ -222,6 +226,17 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
 
             # Re-check API status after settings changes
             self.check_api_status()
+
+    def on_tray_activated(self, reason):
+        """Handle tray icon activation (clicks)"""
+        # ActivationReason.Trigger == left click
+        if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger:
+            if self.log_window.isVisible():
+                self.log_window.hide()
+            else:
+                self.log_window.show()
+                self.log_window.raise_()
+                self.log_window.activateWindow()
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -583,7 +598,7 @@ class SettingsDialog(QtWidgets.QDialog):
 class LogWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Whispex")
+        self.setWindowTitle("Whispex Voice Recognition")
         self.resize(*LOG_WINDOW_SIZE)
 
         # Set icon for log window
@@ -599,6 +614,12 @@ class LogWindow(QtWidgets.QDialog):
         # Create text widget for displaying log
         self.log_text = QtWidgets.QTextEdit()
         self.log_text.setReadOnly(True)
+
+        # Add a welcome message
+        self.append_text("✨ Welcome to Whispex Voice Recognition ✨")
+        self.append_text("This application allows you to speak and have your voice transcribed to text.")
+        self.append_text("The text will be inserted at your cursor position.")
+        self.append_text("\nStatus and log messages will appear here.\n")
 
         # Create status bar
         status_layout = QtWidgets.QHBoxLayout()
@@ -753,12 +774,17 @@ class LogWindow(QtWidgets.QDialog):
         # Scroll down
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+        # Force GUI update
+        QtWidgets.QApplication.processEvents()
 
     def clear_log(self):
         self.log_text.clear()
 
 
 def main():
+    # Enable unbuffered output
+    os.environ['PYTHONUNBUFFERED'] = '1'
+
     # Create Qt application
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # Don't close app when all windows closed
@@ -770,16 +796,53 @@ def main():
     tray_icon = WhisperTrayIcon(main_widget)
     tray_icon.show()
 
+    # Set up log handler to display logs in the GUI
+    setup_gui_logging(tray_icon.log_window)
+
+    # Show the main window (log window) at start
+    tray_icon.log_window.show()
+    tray_icon.log_window.append_text("ℹ️ Application started")
+
     # Show startup message
     tray_icon.showMessage(
         "Whispex",
-        "Speech recognition service is ready. Click the tray icon to start.",
+        "Speech recognition service is ready. Use Alt-Right key to start recording.",
         tray_icon.icon(),
         3000,
     )
 
+    # Automatically start the speech recognition service
+    QtCore.QTimer.singleShot(1000, lambda: tray_icon.start_remote_whisper())
+
     # Execute application
     sys.exit(app.exec_())
+
+
+def setup_gui_logging(log_window):
+    """Set up logging to display in the GUI log window"""
+    class LogHandler(logging.Handler):
+        def __init__(self, log_window):
+            super().__init__()
+            self.log_window = log_window
+            self.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+
+        def emit(self, record):
+            msg = self.format(record)
+            # Use invokeMethod to safely call from any thread
+            QtCore.QMetaObject.invokeMethod(
+                self.log_window,
+                "append_text",
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(str, msg)
+            )
+
+    # Create and add the custom handler
+    gui_handler = LogHandler(log_window)
+    gui_handler.setLevel(logging.INFO)  # Set level to INFO for the GUI
+
+    # Add handler to root logger
+    root_logger = logging.getLogger()
+    root_logger.addHandler(gui_handler)
 
 
 def check_dependencies():
