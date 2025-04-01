@@ -1,32 +1,26 @@
-import threading
-import time
+import os
 import signal
 import sys
 import tempfile
-import os
-import psutil
-from pathlib import Path
+import threading
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import psutil
 import pynput
 import pyperclip
 import sounddevice as sd
 import soundfile
 from openai import OpenAI
 
-# Import settings manager with typed settings
-from settings import (
-    SettingsManager,
-    SettingsSection,
-    GeneralSettings,
-    WhisperSettings,
-    OpenAISettings,
-)
-
 # Import logger
 from logger import log
+# Import settings manager with typed settings
+from settings import (GeneralSettings, OpenAISettings, SettingsManager,
+                      SettingsSection, WhisperSettings)
 
 # Initialize settings manager
 settings_manager = SettingsManager()
@@ -63,6 +57,8 @@ def main():
     auto_off_time = settings_manager.get(
         SettingsSection.GENERAL, GeneralSettings.AUTO_OFF_TIME
     )
+
+    log.debug("Starting keyboard listener - waiting for key presses...")
 
     # Start keyboard listener
     with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
@@ -108,7 +104,9 @@ def initialize_keyboard():
 
     # Get recording key
     key_str = settings_manager.get(SettingsSection.GENERAL, GeneralSettings.REC_KEY)
+    log.debug(f"Raw rec_key value from settings: '{key_str}'")
     app_state.rec_key_obj = evaluate_key_string(key_str)
+    log.debug(f"Evaluated rec_key object: {app_state.rec_key_obj}, type: {type(app_state.rec_key_obj)}")
 
 
 def log_settings():
@@ -132,6 +130,7 @@ def record_and_process():
     """
     Record audio while the key is pressed and process it for transcription.
     """
+    log.debug("Starting audio recording...")
     # Recording and processing audio
     audio_chunks = []
 
@@ -140,43 +139,59 @@ def record_and_process():
             log.warning(f"Audio status: {status}")
         audio_chunks.append(indata.copy())
 
-    recording_samplerate = settings_manager.get(
-        SettingsSection.WHISPER, WhisperSettings.RECORDING_SAMPLE_RATE
-    )
-    whisper_samplerate = settings_manager.get(
-        SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE
-    )
+    try:
+        recording_samplerate = settings_manager.get(
+            SettingsSection.WHISPER, WhisperSettings.RECORDING_SAMPLE_RATE
+        )
+        whisper_samplerate = settings_manager.get(
+            SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE
+        )
 
-    app_state.stream = sd.InputStream(
-        samplerate=recording_samplerate,
-        channels=1,
-        blocksize=256,
-        callback=audio_callback,
-    )
-    app_state.stream.start()
-    while app_state.rec_key_pressed:
-        time.sleep(0.005)
-    app_state.stream.stop()
-    app_state.stream.close()
-    app_state.stream = None
-    recorded_audio = np.concatenate(audio_chunks)[:, 0]
+        app_state.stream = sd.InputStream(
+            samplerate=recording_samplerate,
+            channels=1,
+            blocksize=256,
+            callback=audio_callback,
+        )
+        app_state.stream.start()
+        log.debug("Audio stream started successfully")
 
-    # Check recording duration
-    duration = len(recorded_audio) / recording_samplerate
-    if duration <= 0.1:
-        log.info("Recording too short, skipping")
-        return
+        while app_state.rec_key_pressed:
+            time.sleep(0.005)
 
-    # Downsampling
-    recorded_audio = recorded_audio[:: int(recording_samplerate / whisper_samplerate)]
+        app_state.stream.stop()
+        app_state.stream.close()
+        app_state.stream = None
+        log.debug("Audio recording stopped")
 
-    # Transcription
-    text = get_text(recorded_audio)
-    log.info(f"Transcribed: {text}")
+        if not audio_chunks:
+            log.warning("No audio data recorded!")
+            return
 
-    # Input text
-    text = text + " "
-    type_text(text)
+        log.debug(f"Processing {len(audio_chunks)} audio chunks")
+        recorded_audio = np.concatenate(audio_chunks)[:, 0]
+
+        # Check recording duration
+        duration = len(recorded_audio) / recording_samplerate
+        log.debug(f"Recorded audio duration: {duration:.2f} seconds")
+        if duration <= 0.1:
+            log.info("Recording too short, skipping")
+            return
+
+        # Downsampling
+        recorded_audio = recorded_audio[:: int(recording_samplerate / whisper_samplerate)]
+
+        # Transcription
+        log.debug("Starting audio transcription...")
+        text = get_text(recorded_audio)
+        log.debug("Transcription completed")
+        log.info(f"Transcribed: {text}")
+
+        # Input text
+        text = text + " "
+        type_text(text)
+    except Exception as e:
+        log.error(f"Error during recording and processing: {str(e)}")
 
 
 def get_text(audio, context=None):
@@ -197,7 +212,9 @@ def get_text(audio, context=None):
     whisper_samplerate = settings_manager.get(
         SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE
     )
+    log.debug(f"Saving temporary audio file: {tmp_audio_filename}")
     soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
+    log.debug("Temporary audio file saved")
 
     language = settings_manager.get(SettingsSection.GENERAL, GeneralSettings.LANGUAGE)
     temperature = settings_manager.get(
@@ -216,6 +233,7 @@ def get_text(audio, context=None):
             api_key=settings_manager.get(SettingsSection.OPENAI, OpenAISettings.API_KEY)
         )
 
+        log.debug("Sending request to OpenAI Whisper API...")
         api_response = client.audio.transcriptions.create(
             model="whisper-1",
             file=open(tmp_audio_filename, "rb"),
@@ -223,11 +241,13 @@ def get_text(audio, context=None):
             prompt=actual_prompt,
             temperature=temperature,
         )
+        log.debug("Response received from OpenAI Whisper API")
         result_text = api_response.text
     finally:
         # Remove the temporary file after use
         tmp_path = Path(tmp_audio_filename)
         if tmp_path.exists():
+            log.debug(f"Removing temporary audio file: {tmp_audio_filename}")
             tmp_path.unlink()
 
     return result_text
@@ -244,18 +264,27 @@ def type_text(text):
     if settings_manager.get(SettingsSection.GENERAL, GeneralSettings.NO_TYPE, False):
         return
 
+    # Check if controller is initialized
+    if app_state.controller is None:
+        log.error("Keyboard controller not initialized - can't type text")
+        return
+
     input_method = settings_manager.get(
         SettingsSection.GENERAL, GeneralSettings.INPUT_METHOD
     )
 
+    log.debug(f"Using input method: {input_method}")
+
     if input_method == "clipboard_ctrl_v":
         pyperclip.copy(text)
+        log.debug("Text copied to clipboard, sending Ctrl+V")
         app_state.controller.press(pynput.keyboard.Key.ctrl_l)
         app_state.controller.press("v")
         app_state.controller.release("v")
         app_state.controller.release(pynput.keyboard.Key.ctrl_l)
     elif input_method == "clipboard_ctrl_shift_v":
         pyperclip.copy(text)
+        log.debug("Text copied to clipboard, sending Ctrl+Shift+V")
         app_state.controller.press(pynput.keyboard.Key.ctrl_l)
         app_state.controller.press(pynput.keyboard.Key.shift_l)
         app_state.controller.press("v")
@@ -263,6 +292,7 @@ def type_text(text):
         app_state.controller.release(pynput.keyboard.Key.shift_l)
         app_state.controller.release(pynput.keyboard.Key.ctrl_l)
     elif input_method == "direct":
+        log.debug("Using direct typing method")
         app_state.controller.type(text)
     else:
         log.warning(f"Unknown input method: {input_method}. Using direct input.")
@@ -276,7 +306,9 @@ def on_press(key):
     Args:
         key: The key that was pressed
     """
+    # Only log recording key events to reduce log spam
     if key == app_state.rec_key_obj:
+        log.debug(f"Recording key pressed: {key}")
         app_state.rec_key_pressed = True
 
         # start recording in a new thread
@@ -291,7 +323,9 @@ def on_release(key):
     Args:
         key: The key that was released
     """
+    # Only log recording key events to reduce log spam
     if key == app_state.rec_key_obj:
+        log.debug(f"Recording key released: {key}")
         app_state.rec_key_pressed = False
         app_state.time_last_used = time.time()
 
@@ -376,13 +410,32 @@ def evaluate_key_string(key_string):
     Returns:
         Key object or string
     """
-    # Handle special keys like Key.ctrl, Key.f1, etc.
-    if key_string.startswith("Key."):
-        key_attr = key_string.split(".", 1)[1]
+    log.debug(f"Evaluating key string: '{key_string}'")
+
+    # Handle 'pynput.keyboard.Key.X' format
+    if key_string.startswith("pynput.keyboard.Key."):
+        key_attr = key_string.split(".")[-1]
+        log.debug(f"Extracting key attribute: {key_attr}")
         if hasattr(pynput.keyboard.Key, key_attr):
-            return getattr(pynput.keyboard.Key, key_attr)
+            key_obj = getattr(pynput.keyboard.Key, key_attr)
+            log.debug(f"Found special key: {key_obj}")
+            return key_obj
+        else:
+            log.warning(f"Special key '{key_attr}' not found in pynput.keyboard.Key")
+
+    # Handle 'Key.X' format
+    elif key_string.startswith("Key."):
+        key_attr = key_string.split(".", 1)[1]
+        log.debug(f"Special key detected, looking for Key.{key_attr}")
+        if hasattr(pynput.keyboard.Key, key_attr):
+            key_obj = getattr(pynput.keyboard.Key, key_attr)
+            log.debug(f"Found special key: {key_obj}")
+            return key_obj
+        else:
+            log.warning(f"Special key '{key_attr}' not found in pynput.keyboard.Key")
 
     # For regular keys, just return the character
+    log.debug(f"Using character key: '{key_string}'")
     return key_string
 
 

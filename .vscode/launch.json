@@ -2,14 +2,27 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run whispex CLI",
+            "name": "debug whispex.py",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/whispex.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PYTHONUNBUFFERED": "1"
+                "PYTHONUNBUFFERED": "1",
+                "WHISPEX_LOG_LEVEL": "DEBUG"
+            }
+        },
+        {
+            "name": "info whispex.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/whispex.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONUNBUFFERED": "1",
+                "WHISPEX_LOG_LEVEL": "INFO"
             }
         },
         {
@@ -17,18 +30,6 @@
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/whispex-gui.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONUNBUFFERED": "1"
-            }
-        },
-        {
-            "name": "Run with UV",
-            "type": "python",
-            "request": "launch",
-            "module": "uv.run",
-            "args": ["${file}"],
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
