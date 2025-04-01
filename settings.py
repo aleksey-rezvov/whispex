@@ -21,7 +21,7 @@ class SettingsManager:
         self.script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
         
         # Initialize config path
-        self.config_path = self.get_config_path()
+        self.config_path = self.ensure_config_path()
         
         # Initialize settings container
         self.settings = {}
@@ -29,7 +29,7 @@ class SettingsManager:
         # Load settings
         self.load_settings()
     
-    def get_config_path(self):
+    def ensure_config_path(self):
         """
         Get path to configuration file.
         If user config doesn't exist, creates it from the default template.
@@ -145,57 +145,28 @@ class SettingsManager:
     
     def set(self, section, key, value):
         """
-        Set setting value.
+        Set setting value and save settings to file.
         
         Args:
             section (str): Section name
             key (str): Setting key
             value: Setting value
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
         if section not in self.settings:
             self.settings[section] = {}
+        
+        # Store old value to check if changed
+        old_value = self.settings[section].get(key)
+        
+        # Set new value
         self.settings[section][key] = value
-    
-    def update_from_gui(self, temperature=None, prompt=None):
-        """
-        Update settings from GUI components.
         
-        Args:
-            temperature (float, optional): Temperature value from GUI
-            prompt (str, optional): Prompt value from GUI
-        
-        Returns:
-            bool: True if settings were changed and saved
-        """
-        changed = False
-        
-        # Update temperature if provided
-        if temperature is not None:
-            self.settings["whisper"]["temperature"] = temperature
-            changed = True
-        
-        # Update prompt if provided
-        if prompt is not None and prompt.strip():
-            self.settings["whisper"]["prompt"] = prompt
-            changed = True
-        
-        # Save settings if changed
-        if changed:
+        # Only save if value changed
+        if old_value != value:
+            logger.info(f"Setting changed: [{section}] {key} = {value}")
             return self.save_settings()
         
-        return False
-    
-    def reload_settings(self):
-        """
-        Reload settings from disk.
-        Useful when settings might have been changed externally.
-        
-        Returns:
-            bool: True if succeeded, False otherwise
-        """
-        try:
-            self.load_settings()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to reload settings: {e}")
-            return False 
+        return True 

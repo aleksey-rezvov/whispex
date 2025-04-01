@@ -43,6 +43,7 @@ class AppState:
     stream: Optional[sd.InputStream] = None  # Audio stream
     controller: Optional[pynput.keyboard.Controller] = None  # Keyboard controller
     signal_handler_running: bool = False  # Flag to prevent multiple signal handler executions
+    rec_key_obj: Optional[object] = None  # Keyboard key object for recording
 
 # Create a singleton instance
 app_state = AppState()
@@ -59,11 +60,10 @@ def main():
     
     # Get auto-off time from config
     auto_off_time = settings_manager.get("general", "auto_off_time")
-    rec_key = settings_manager.get("general", "rec_key_obj")
     
     # Start keyboard listener
     with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        logger.info(f"Press {rec_key} to start recording")
+        logger.info(f"Press {app_state.rec_key_obj} to start recording")
         try:
             while listener.is_alive():
                 if auto_off_time and auto_off_time > 0 and time.time() - app_state.time_last_used > auto_off_time:
@@ -99,15 +99,13 @@ def initialize_keyboard():
     
     # Get recording key
     key_str = settings_manager.get("general", "rec_key")
-    key_obj = evaluate_key_string(key_str)
-    # Store the key object in settings for convenience
-    settings_manager.set("general", "rec_key_obj", key_obj)
+    app_state.rec_key_obj = evaluate_key_string(key_str)
 
 def log_settings():
     """Log information about current settings."""
     logger.info(f"Language: {settings_manager.get('general', 'language')}")
     logger.info(f"Model temperature: {settings_manager.get('whisper', 'temperature')}")
-    logger.info(f"Recording key: {settings_manager.get('general', 'rec_key_obj')}")
+    logger.info(f"Recording key: {app_state.rec_key_obj}")
     logger.info(f"Input method: {settings_manager.get('general', 'input_method')}")
     logger.info(f"Prompt length: {len(settings_manager.get('whisper', 'prompt', ''))}")
 
@@ -242,8 +240,7 @@ def on_press(key):
     Args:
         key: The key that was pressed
     """
-    rec_key = settings_manager.get("general", "rec_key_obj")
-    if key == rec_key:
+    if key == app_state.rec_key_obj:
         app_state.rec_key_pressed = True
 
         # start recording in a new thread
@@ -257,8 +254,7 @@ def on_release(key):
     Args:
         key: The key that was released
     """
-    rec_key = settings_manager.get("general", "rec_key_obj")
-    if key == rec_key:
+    if key == app_state.rec_key_obj:
         app_state.rec_key_pressed = False
         app_state.time_last_used = time.time()
 

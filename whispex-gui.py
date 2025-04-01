@@ -330,11 +330,14 @@ class SettingsDialog(QtWidgets.QDialog):
             print("WARNING: Prompt was empty, using empty string")
             prompt = ""
         
-        # Update settings
-        if self.settings_manager.update_from_gui(temperature=temperature, prompt=prompt):
+        # Update settings directly
+        success1 = self.settings_manager.set("whisper", "temperature", temperature)
+        success2 = self.settings_manager.set("whisper", "prompt", prompt)
+        
+        if success1 and success2:
             print("Settings updated successfully")
         else:
-            print("No changes made to settings")
+            print("Error saving settings")
         
         # Accept dialog
         self.accept()
