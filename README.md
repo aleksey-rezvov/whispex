@@ -12,6 +12,30 @@ curl -fsSL https://astral.sh/uv/install.sh | bash
 uv add numpy pynput pyperclip sounddevice soundfile openai tomli
 ```
 
+## Development
+
+### Code Linting
+
+To maintain code quality, this project uses the `ruff` linter. First install development dependencies:
+
+```bash
+# Install development dependencies
+uv add --dev ruff
+```
+
+Run linting:
+
+```bash
+# Check for linting issues
+uv run --group dev ruff check . --exclude .venv
+
+# Check formatting issues
+uv run --group dev ruff format --check . --exclude .venv
+
+# Apply format fixes
+uv run --group dev ruff format . --exclude .venv
+```
+
 ## Configuration
 
 Whispex uses TOML format for configuration. The configuration is searched in the following order:

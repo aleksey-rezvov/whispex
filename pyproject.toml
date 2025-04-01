@@ -16,3 +16,29 @@ dependencies = [
     "tomli>=2.2.1",
     "tomli-w>=1.2.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.2",
+]
+
+[tool.ruff]
+# Exclude .venv directory
+exclude = [".venv"]
+# Supported Python versions
+target-version = "py312"
+
+# Linter settings
+[tool.ruff.lint]
+# Enable pycodestyle (E) and pyflakes (F)
+select = ["E", "F"]
+# Ignore line length issues only
+ignore = [
+    "E501",  # Line too long
+]
+
+# Formatting settings
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
