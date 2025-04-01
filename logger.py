@@ -12,4 +12,4 @@ logging.basicConfig(
 log = logging.getLogger("whispex")
 
 # Don't propagate to root logger to avoid duplicate messages
-log.propagate = False
+# log.propagate = False

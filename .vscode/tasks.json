@@ -1,0 +1,45 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Lint with Ruff",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python -m ruff check --fix ${file}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Format with Ruff",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python -m ruff format ${file}",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Current File with UV",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python -m uv.run ${file}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Install Dependencies with UV",
+            "type": "shell",
+            "command": "uv pip install -e .",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
