@@ -5,7 +5,6 @@ import sys
 import tempfile
 import os
 import psutil
-import logging
 import shutil
 from pathlib import Path
 import importlib
@@ -19,18 +18,10 @@ import sounddevice as sd
 import soundfile
 from openai import OpenAI
 
-# Import settings manager
-from settings import SettingsManager
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
+# Import settings manager with typed settings
+from settings import SettingsManager, SettingsSection, GeneralSettings, WhisperSettings, OpenAISettings
+# Import logger
+from logger import log
 
 # Initialize settings manager
 settings_manager = SettingsManager()
@@ -59,25 +50,25 @@ def main():
     signal.signal(signal.SIGHUP, signal_handler)
     
     # Get auto-off time from config
-    auto_off_time = settings_manager.get("general", "auto_off_time")
+    auto_off_time = settings_manager.get(SettingsSection.GENERAL, GeneralSettings.AUTO_OFF_TIME)
     
     # Start keyboard listener
     with pynput.keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        logger.info(f"Press {app_state.rec_key_obj} to start recording")
+        log.info(f"Press {app_state.rec_key_obj} to start recording")
         try:
             while listener.is_alive():
                 if auto_off_time and auto_off_time > 0 and time.time() - app_state.time_last_used > auto_off_time:
-                    logger.info("Auto off timeout reached")
+                    log.info("Auto off timeout reached")
                     break
                 time.sleep(1)
         except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
+            log.info("Keyboard interrupt received")
             
     # Explicitly close all threads before exit
     if 'listener' in locals() and listener:
         listener.stop()
     
-    logger.info("Program successfully terminated")
+    log.info("Program successfully terminated")
 
 def initialize_settings():
     """
@@ -85,7 +76,7 @@ def initialize_settings():
     Updates the module level settings dictionary.
     """
     # Settings are already loaded in the settings_manager
-    logger.info("Application started with settings from configuration file")
+    log.info("Application started with settings from configuration file")
     
     # Initialize keyboard controller
     initialize_keyboard()
@@ -98,16 +89,16 @@ def initialize_keyboard():
     app_state.controller = pynput.keyboard.Controller()
     
     # Get recording key
-    key_str = settings_manager.get("general", "rec_key")
+    key_str = settings_manager.get(SettingsSection.GENERAL, GeneralSettings.REC_KEY)
     app_state.rec_key_obj = evaluate_key_string(key_str)
 
 def log_settings():
     """Log information about current settings."""
-    logger.info(f"Language: {settings_manager.get('general', 'language')}")
-    logger.info(f"Model temperature: {settings_manager.get('whisper', 'temperature')}")
-    logger.info(f"Recording key: {app_state.rec_key_obj}")
-    logger.info(f"Input method: {settings_manager.get('general', 'input_method')}")
-    logger.info(f"Prompt length: {len(settings_manager.get('whisper', 'prompt', ''))}")
+    log.info(f"Language: {settings_manager.get(SettingsSection.GENERAL, GeneralSettings.LANGUAGE)}")
+    log.info(f"Model temperature: {settings_manager.get(SettingsSection.WHISPER, WhisperSettings.TEMPERATURE)}")
+    log.info(f"Recording key: {app_state.rec_key_obj}")
+    log.info(f"Input method: {settings_manager.get(SettingsSection.GENERAL, GeneralSettings.INPUT_METHOD)}")
+    log.info(f"Prompt length: {len(settings_manager.get(SettingsSection.WHISPER, WhisperSettings.PROMPT, ''))}")
 
 def record_and_process():
     """
@@ -118,11 +109,11 @@ def record_and_process():
 
     def audio_callback(indata, frames, time, status):
         if status:
-            logger.warning(f"Audio status: {status}")
+            log.warning(f"Audio status: {status}")
         audio_chunks.append(indata.copy())
 
-    recording_samplerate = settings_manager.get("whisper", "recording_sample_rate")
-    whisper_samplerate = settings_manager.get("whisper", "sample_rate")
+    recording_samplerate = settings_manager.get(SettingsSection.WHISPER, WhisperSettings.RECORDING_SAMPLE_RATE)
+    whisper_samplerate = settings_manager.get(SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE)
     
     app_state.stream = sd.InputStream(
         samplerate=recording_samplerate,
@@ -141,7 +132,7 @@ def record_and_process():
     # Check recording duration
     duration = len(recorded_audio) / recording_samplerate
     if duration <= 0.1:
-        logger.info("Recording too short, skipping")
+        log.info("Recording too short, skipping")
         return
 
     # Downsampling
@@ -149,7 +140,7 @@ def record_and_process():
 
     # Transcription
     text = get_text(recorded_audio)
-    logger.info(f"Transcribed: {text}")
+    log.info(f"Transcribed: {text}")
 
     # Input text
     text = text + " "
@@ -170,19 +161,19 @@ def get_text(audio, context=None):
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         tmp_audio_filename = temp_file.name
     
-    whisper_samplerate = settings_manager.get("whisper", "sample_rate")
+    whisper_samplerate = settings_manager.get(SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE)
     soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
     
-    language = settings_manager.get("general", "language")
-    temperature = settings_manager.get("whisper", "temperature")
-    prompt_text = settings_manager.get("whisper", "prompt")
+    language = settings_manager.get(SettingsSection.GENERAL, GeneralSettings.LANGUAGE)
+    temperature = settings_manager.get(SettingsSection.WHISPER, WhisperSettings.TEMPERATURE)
+    prompt_text = settings_manager.get(SettingsSection.WHISPER, WhisperSettings.PROMPT)
     actual_prompt = context or prompt_text
     
-    logger.info(f"OpenAI request: lang={language}, temp={temperature}, prompt_length={len(actual_prompt)}")
+    log.info(f"OpenAI request: lang={language}, temp={temperature}, prompt_length={len(actual_prompt)}")
     
     try:
         # Create OpenAI client with API key
-        client = OpenAI(api_key=settings_manager.get("openai", "api_key"))
+        client = OpenAI(api_key=settings_manager.get(SettingsSection.OPENAI, OpenAISettings.API_KEY))
         
         api_response = client.audio.transcriptions.create(
             model="whisper-1",
@@ -208,10 +199,10 @@ def type_text(text):
         text (str): Text to type
     """
     # Skip if typing is disabled in config
-    if settings_manager.get("general", "no_type", False):
+    if settings_manager.get(SettingsSection.GENERAL, GeneralSettings.NO_TYPE, False):
         return
     
-    input_method = settings_manager.get("general", "input_method")
+    input_method = settings_manager.get(SettingsSection.GENERAL, GeneralSettings.INPUT_METHOD)
     
     if input_method == "clipboard_ctrl_v":
         pyperclip.copy(text)
@@ -230,7 +221,7 @@ def type_text(text):
     elif input_method == "direct":
         app_state.controller.type(text)
     else:
-        logger.warning(f"Unknown input method: {input_method}. Using direct input.")
+        log.warning(f"Unknown input method: {input_method}. Using direct input.")
         app_state.controller.type(text)
 
 def on_press(key):
@@ -258,6 +249,33 @@ def on_release(key):
         app_state.rec_key_pressed = False
         app_state.time_last_used = time.time()
 
+def signal_handler(signum, frame):
+    """
+    Handle termination signals.
+    
+    Args:
+        signum: Signal number
+        frame: Current stack frame
+    """
+    # Prevent multiple signal handlers from running
+    if app_state.signal_handler_running:
+        return
+    app_state.signal_handler_running = True
+    
+    log.info(f"Received signal {signum}, shutting down...")
+    
+    # Clean up resources
+    if app_state.stream:
+        log.info("Closing audio stream...")
+        app_state.stream.stop()
+        app_state.stream.close()
+    
+    # Terminate all child processes to prevent orphans
+    terminate_process_tree(os.getpid())
+    
+    # Exit gracefully
+    sys.exit(0)
+
 def terminate_process_tree(pid, timeout=3):
     """
     Terminates a process and all its children processes.
@@ -273,13 +291,13 @@ def terminate_process_tree(pid, timeout=3):
         
         # Log children to terminate
         if children:
-            logger.info(f"Terminating {len(children)} child processes...")
+            log.info(f"Terminating {len(children)} child processes...")
             
             # Send SIGTERM to all children first
             for child in children:
                 try:
                     if child.is_running():
-                        logger.info(f"Sending SIGTERM to child process {child.pid}...")
+                        log.info(f"Sending SIGTERM to child process {child.pid}...")
                         child.terminate()
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
@@ -288,94 +306,35 @@ def terminate_process_tree(pid, timeout=3):
             gone, alive = psutil.wait_procs(children, timeout=timeout)
             for child in alive:
                 try:
-                    logger.warning(f"Force killing child process {child.pid}...")
+                    log.warning(f"Force killing child process {child.pid}...")
                     child.kill()
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
         
     except psutil.NoSuchProcess:
-        logger.info(f"Process {pid} no longer exists")
+        log.info(f"Process {pid} no longer exists")
     except Exception as e:
-        logger.error(f"Error terminating process tree: {e}")
+        log.error(f"Error terminating process tree: {e}")
 
-def signal_handler(sig, frame):
+def evaluate_key_string(key_string):
     """
-    Handle termination signals with proper cleanup.
+    Evaluate a key string to get the appropriate key object.
+    Can handle special keys like Key.ctrl, Key.f1, etc.
     
     Args:
-        sig: Signal number
-        frame: Current stack frame
-    """
-    # Prevent multiple executions of signal handler
-    if app_state.signal_handler_running:
-        return
-    
-    app_state.signal_handler_running = True
-    logger.info(f"Received signal {sig}, proper termination...")
-    
-    # First stop any recording in progress
-    app_state.rec_key_pressed = False
-    
-    # Close keyboard listener if it exists
-    if 'listener' in globals():
-        try:
-            listener.stop()
-            logger.info("Keyboard listener stopped")
-        except Exception as e:
-            logger.error(f"Error stopping keyboard listener: {e}")
-    
-    # Close audio devices if they are open
-    if app_state.stream:
-        try:
-            app_state.stream.stop()
-            app_state.stream.close()
-            logger.info("Audio stream closed")
-        except Exception as e:
-            logger.error(f"Error closing audio stream: {e}")
-    
-    # Terminate only our direct child processes, don't look for other instances
-    try:
-        current_pid = os.getpid()
-        logger.info(f"Cleaning up direct child processes of {current_pid}...")
-        terminate_process_tree(current_pid)
-    except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
-    
-    logger.info("Cleanup completed, exiting...")
-    sys.exit(0)
-
-def evaluate_key_string(key_str):
-    """
-    Evaluate a Python expression to get a keyboard key.
-    Allows configuration file to specify keys like 'pynput.keyboard.Key.alt_r'
-    
-    Args:
-        key_str (str): Python expression representing a key
+        key_string (str): String representation of the key
         
     Returns:
-        object: Key object or string
+        Key object or string
     """
-    try:
-        # Try to evaluate the string as Python code
-        # First import necessary modules
-        keyboard_module = importlib.import_module('pynput.keyboard')
-        
-        # Create a safe namespace with only allowed modules
-        namespace = {
-            'pynput': pynput,
-            'keyboard': keyboard_module
-        }
-        
-        # If the string doesn't contain any Python expressions, return as is
-        if not any(marker in key_str for marker in [".", "(", ")", "pynput"]):
-            return key_str
-            
-        # Evaluate the expression
-        return eval(key_str, namespace)
-    except Exception as e:
-        logger.warning(f"Could not evaluate key string '{key_str}': {e}")
-        return key_str  # Return original string if evaluation fails
+    # Handle special keys like Key.ctrl, Key.f1, etc.
+    if key_string.startswith("Key."):
+        key_attr = key_string.split(".", 1)[1]
+        if hasattr(pynput.keyboard.Key, key_attr):
+            return getattr(pynput.keyboard.Key, key_attr)
+    
+    # For regular keys, just return the character
+    return key_string
 
-# Only run the main function if this script is executed directly
 if __name__ == "__main__":
     main()

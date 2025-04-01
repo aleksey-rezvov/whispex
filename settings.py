@@ -1,13 +1,36 @@
-#!/usr/bin/env python3
 import os
 import shutil
-import logging
 from pathlib import Path
 import tomli
 import tomli_w
+from enum import Enum, auto
+from typing import Dict, Any, Union, Optional, List, Tuple
 
-# Setup logging
-logger = logging.getLogger(__name__)
+# Import common logger
+from logger import log
+
+# Define strict setting keys
+class GeneralSettings(Enum):
+    LANGUAGE = "language"
+    REC_KEY = "rec_key"
+    INPUT_METHOD = "input_method"
+    AUTO_OFF_TIME = "auto_off_time"
+    NO_TYPE = "no_type"
+
+class WhisperSettings(Enum):
+    TEMPERATURE = "temperature"
+    PROMPT = "prompt"
+    SAMPLE_RATE = "sample_rate"
+    RECORDING_SAMPLE_RATE = "recording_sample_rate"
+
+class OpenAISettings(Enum):
+    API_KEY = "api_key"
+
+# Define settings sections
+class SettingsSection(Enum):
+    GENERAL = "general"
+    WHISPER = "whisper"
+    OPENAI = "openai"
 
 class SettingsManager:
     """
@@ -46,7 +69,7 @@ class SettingsManager:
         
         # Check if default config exists
         if not default_config_path.exists():
-            logger.error(f"Default configuration file not found at {default_config_path}")
+            log.error(f"Default configuration file not found at {default_config_path}")
             return None
             
         # If user config doesn't exist, create directory and copy default config
@@ -57,10 +80,10 @@ class SettingsManager:
                 
                 # Copy default config to user location
                 shutil.copy2(default_config_path, user_config_path)
-                logger.info(f"Created user configuration at {user_config_path}")
+                log.info(f"Created user configuration at {user_config_path}")
             except Exception as e:
-                logger.error(f"Failed to create user configuration: {e}")
-                logger.info(f"Using default configuration from {default_config_path}")
+                log.error(f"Failed to create user configuration: {e}")
+                log.info(f"Using default configuration from {default_config_path}")
                 return default_config_path
         
         return user_config_path
@@ -70,7 +93,7 @@ class SettingsManager:
         Load settings from TOML config.
         """
         if not self.config_path:
-            logger.error("No configuration path available")
+            log.error("No configuration path available")
             raise ValueError("Configuration file not found")
         
         try:
@@ -78,33 +101,33 @@ class SettingsManager:
                 config = tomli.load(f)
                 
             # Handle OpenAI API key from environment if not in config
-            if not config.get("openai", {}).get("api_key"):
+            if not config.get(SettingsSection.OPENAI.value, {}).get(OpenAISettings.API_KEY.value):
                 env_api_key = os.environ.get("OPENAI_API_KEY")
                 if env_api_key:
-                    if "openai" not in config:
-                        config["openai"] = {}
-                    config["openai"]["api_key"] = env_api_key
-                    logger.info("Using OpenAI API key from environment variables")
+                    if SettingsSection.OPENAI.value not in config:
+                        config[SettingsSection.OPENAI.value] = {}
+                    config[SettingsSection.OPENAI.value][OpenAISettings.API_KEY.value] = env_api_key
+                    log.info("Using OpenAI API key from environment variables")
                 else:
-                    logger.error("OpenAI API key is not specified either in the configuration or in OPENAI_API_KEY environment variable")
-                    logger.error("Working with OpenAI API is not possible without a valid key")
-                    logger.error("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
+                    log.error("OpenAI API key is not specified either in the configuration or in OPENAI_API_KEY environment variable")
+                    log.error("Working with OpenAI API is not possible without a valid key")
+                    log.error("Add the key to ~/.config/whispex/config.toml or set the OPENAI_API_KEY environment variable")
                     raise ValueError("OpenAI API key is not specified")
             
             # Required sections in the config
-            required_sections = ["general", "whisper", "openai"]
+            required_sections = [section.value for section in SettingsSection]
             
             # Verify the config has all required sections
             for section in required_sections:
                 if section not in config:
-                    logger.error(f"Missing required section '{section}' in configuration")
+                    log.error(f"Missing required section '{section}' in configuration")
                     raise ValueError(f"Missing required section '{section}' in configuration")
             
             self.settings = config
-            logger.info(f"Loaded settings from {self.config_path}")
+            log.info(f"Loaded settings from {self.config_path}")
         except Exception as e:
-            logger.error(f"Error loading configuration: {e}")
-            logger.error("Cannot proceed without valid configuration")
+            log.error(f"Error loading configuration: {e}")
+            log.error("Cannot proceed without valid configuration")
             raise e
     
     def save_settings(self):
@@ -115,7 +138,7 @@ class SettingsManager:
             bool: True if successful, False otherwise
         """
         if not self.config_path:
-            logger.error("No configuration path available")
+            log.error("No configuration path available")
             return False
             
         try:
@@ -123,50 +146,62 @@ class SettingsManager:
             with open(self.config_path, "wb") as f:
                 tomli_w.dump(self.settings, f)
             
-            logger.info(f"Settings saved to file: {self.config_path}")
+            log.info(f"Settings saved to file: {self.config_path}")
             return True
         except Exception as e:
-            logger.error(f"Error saving settings: {e}")
+            log.error(f"Error saving settings: {e}")
             return False
     
-    def get(self, section, key, default=None):
+    def get(self, section: Optional[Union[SettingsSection, str]], 
+            key: Union[GeneralSettings, WhisperSettings, OpenAISettings, str], 
+            default: Any = None) -> Any:
         """
         Get setting value with fallback to default.
         
         Args:
-            section (str): Section name
-            key (str): Setting key
+            section: Section name or enum
+            key: Setting key or enum
             default: Default value if not found
             
         Returns:
             Setting value or default
         """
-        return self.settings.get(section, {}).get(key, default)
+        # Convert enums to their string values
+        section_str = section.value if isinstance(section, SettingsSection) else section
+        key_str = key.value if isinstance(key, (GeneralSettings, WhisperSettings, OpenAISettings)) else key
+        
+        return self.settings.get(section_str, {}).get(key_str, default)
     
-    def set(self, section, key, value):
+    def set(self, section: Union[SettingsSection, str], 
+            key: Union[GeneralSettings, WhisperSettings, OpenAISettings, str], 
+            value: Any) -> bool:
         """
         Set setting value and save settings to file.
         
         Args:
-            section (str): Section name
-            key (str): Setting key
+            section: Section name or enum
+            key: Setting key or enum
             value: Setting value
             
         Returns:
             bool: True if successful, False otherwise
         """
-        if section not in self.settings:
-            self.settings[section] = {}
+        # Convert enums to their string values
+        section_str = section.value if isinstance(section, SettingsSection) else section
+        key_str = key.value if isinstance(key, (GeneralSettings, WhisperSettings, OpenAISettings)) else key
+        
+        if section_str not in self.settings:
+            self.settings[section_str] = {}
         
         # Store old value to check if changed
-        old_value = self.settings[section].get(key)
+        old_value = self.settings[section_str].get(key_str)
         
         # Set new value
-        self.settings[section][key] = value
+        self.settings[section_str][key_str] = value
         
         # Only save if value changed
         if old_value != value:
-            logger.info(f"Setting changed: [{section}] {key} = {value}")
+            log.info(f"Setting changed: [{section_str}] {key_str} = {value}")
             return self.save_settings()
         
         return True 

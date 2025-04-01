@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import signal
 import sys
@@ -9,31 +8,35 @@ from PyQt5 import QtWidgets, QtGui, QtCore
 import tomli
 
 # Import settings manager
-from settings import SettingsManager
+from settings import SettingsManager, SettingsSection, WhisperSettings
+# Import logger
+from logger import log
+
+# Constants
+UV_RUN_COMMAND = ["uv", "run"]
+LOG_WINDOW_SIZE = (700, 500)
+SETTINGS_DIALOG_SIZE = (700, 500)
 
 class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent)
         
         # Setup script directories and paths
-        self.script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+        self.script_path = self.script_dir / "whispex.py"
         
-        # Use custom icon
-        icon_path = os.path.join(self.script_dir, "whispex.png")
+        # Store icon path as class member
+        self.icon_path = self.script_dir / "whispex.png"
         
-        if os.path.exists(icon_path):
-            self.setIcon(QtGui.QIcon(icon_path))
+        if self.icon_path.exists():
+            self.setIcon(QtGui.QIcon(str(self.icon_path)))
         else:
             # Fallback to system icon
             self.setIcon(QtGui.QIcon.fromTheme("audio-input-microphone"))
-            print(f"Warning: Icon not found at path {icon_path}")
+            log.warning(f"Icon not found at path {self.icon_path}")
         
         # Save parent widget
         self.parent_widget = parent
-        
-        # Audio device check will happen after menu creation
-        self.has_audio = False
-        self.audio_devices = []
         
         # Create log window (before loading settings, so it's available for logging)
         self.log_window = LogWindow(self.parent_widget)
@@ -86,12 +89,11 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                 self.start_remote_action.setEnabled(False)
                 self.stop_action.setEnabled(True)
                 # Show notification
+                icon = QtGui.QIcon(str(self.icon_path)) if self.icon_path.exists() else QtGui.QIcon.fromTheme("audio-input-microphone")
                 self.showMessage(
                     "Whispex", 
                     "Speech recognition service started", 
-                    QtGui.QIcon(os.path.join(self.script_dir, "whispex.png")) 
-                    if os.path.exists(os.path.join(self.script_dir, "whispex.png")) 
-                    else QtGui.QIcon.fromTheme("audio-input-microphone"), 
+                    icon, 
                     3000
                 )
     
@@ -99,17 +101,16 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         """
         Start the Whispex whisper process.
         """
-        script_path = os.path.join(self.script_dir, script_name)
-        
-        if not os.path.exists(script_path):
-            self.log_window.append_text(f"Error: Script {script_path} not found")
+        if not self.script_path.exists():
+            self.log_window.append_text(f"Error: Script {self.script_path} not found")
             return False
         
         try:
             # Start the whisper script in a separate process
-            subprocess.Popen([
-                "uv", "run", script_path
-            ], cwd=self.script_dir)
+            subprocess.Popen(
+                UV_RUN_COMMAND + [str(self.script_path)], 
+                cwd=str(self.script_dir)
+            )
             
             self.log_window.append_text(f"Started {script_name}")
             return True
@@ -172,46 +173,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         # Terminate application
         QtWidgets.QApplication.quit()
 
-    def check_audio_devices(self):
-        """Checks availability of audio devices using uv run"""
-        try:
-            # Run script to get audio devices
-            check_script = """
-import json
-import sounddevice as sd
-print(json.dumps(sd.query_devices()))
-"""
-            proc = subprocess.Popen(
-                ["uv", "run", "-c", check_script],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
-            )
-            stdout, stderr = proc.communicate()
-            
-            if proc.returncode == 0:
-                import json
-                self.audio_devices = json.loads(stdout)
-                self.has_audio = True
-                self.log_window.append_text("✅ Audio devices access successful")
-                
-                # Display device information
-                input_devices = [d for d in self.audio_devices if d.get('max_input_channels', 0) > 0]
-                if input_devices:
-                    self.log_window.append_text(f"✅ Found {len(input_devices)} audio recording devices")
-                    for i, device in enumerate(input_devices):
-                        self.log_window.append_text(f"    {i+1}. {device.get('name', 'Unknown device')}")
-                else:
-                    self.log_window.append_text("⚠️ No recording devices found. Check your microphone.")
-            else:
-                self.has_audio = False
-                self.audio_error = stderr
-                self.log_window.append_text(f"❌ Audio access error: {stderr}")
-        except Exception as e:
-            self.has_audio = False
-            self.audio_error = str(e)
-            self.log_window.append_text(f"❌ Exception during audio check: {str(e)}")
-
     def show_settings(self):
         """Shows settings dialog"""
         # Helper function for safe logging
@@ -219,38 +180,35 @@ print(json.dumps(sd.query_devices()))
             if hasattr(self, 'log_window') and self.log_window:
                 self.log_window.append_text(message)
             else:
-                print(message)
+                log.info(message)
                 
         log_message("⚙️ Opening settings dialog...")
         settings_dialog = SettingsDialog(self.settings_manager, self.parent_widget)
         if settings_dialog.exec_() == QtWidgets.QDialog.Accepted:
-            # Save settings
-            if self.settings_manager.save_settings():
-                log_message("✅ Settings saved successfully")
+            # Settings are automatically saved when changed now
+            log_message("✅ Settings applied successfully")
                 
-                # If process is already running, restart it with new settings
-                if self.running:
-                    log_message("🔄 Restarting process with new settings...")
-                    # Stop current process
-                    self.stop_whisper()
-                    # Start process with new settings
-                    self.start_remote_whisper()
-            else:
-                log_message("❌ Failed to save settings")
+            # If process is already running, restart it with new settings
+            if self.running:
+                log_message("🔄 Restarting process with new settings...")
+                # Stop current process
+                self.stop_whisper()
+                # Start process with new settings
+                self.start_remote_whisper()
 
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, settings_manager, parent=None):
         super().__init__(parent)
         self.settings_manager = settings_manager
         self.setWindowTitle("Whispex Settings")
-        self.resize(700, 500)
+        self.resize(*SETTINGS_DIALOG_SIZE)
         
         # Set icon for settings window
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(script_dir, "whispex.png")
+        script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = script_dir / "whispex.png"
         
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QtGui.QIcon(icon_path))
+        if icon_path.exists():
+            self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         
         # Create widgets
         layout = QtWidgets.QVBoxLayout()
@@ -262,7 +220,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.temp_spinbox.setMinimum(0.0)
         self.temp_spinbox.setMaximum(1.0)
         self.temp_spinbox.setSingleStep(0.1)
-        self.temp_spinbox.setValue(settings_manager.get(None, "temperature", 0.2))
+        self.temp_spinbox.setValue(settings_manager.get(SettingsSection.WHISPER, WhisperSettings.TEMPERATURE, 0.2))
         self.temp_spinbox.setToolTip("Value from 0.0 to 1.0. Lower values make output more deterministic.")
         temp_layout.addWidget(temp_label)
         temp_layout.addWidget(self.temp_spinbox)
@@ -273,7 +231,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(prompt_label)
         
         self.prompt_text = QtWidgets.QTextEdit()
-        default_prompt = settings_manager.settings.get("prompt", "")
+        default_prompt = settings_manager.get(SettingsSection.WHISPER, WhisperSettings.PROMPT, "")
         self.prompt_text.setPlainText(default_prompt)
         layout.addWidget(self.prompt_text)
         
@@ -312,9 +270,9 @@ class SettingsDialog(QtWidgets.QDialog):
                 self.temp_spinbox.setValue(default_config["whisper"]["temperature"])
                 self.prompt_text.setPlainText(default_config["whisper"]["prompt"])
             else:
-                print("Default config file not found")
+                log.warning("Default config file not found")
         except Exception as e:
-            print(f"Error loading default settings: {e}")
+            log.error(f"Error loading default settings: {e}")
             # Use safe fallback values
             self.temp_spinbox.setValue(0.2)
             self.prompt_text.clear()
@@ -327,17 +285,17 @@ class SettingsDialog(QtWidgets.QDialog):
         # Get prompt
         prompt = self.prompt_text.toPlainText()
         if not prompt.strip():
-            print("WARNING: Prompt was empty, using empty string")
+            log.warning("Prompt was empty, using empty string")
             prompt = ""
         
         # Update settings directly
-        success1 = self.settings_manager.set("whisper", "temperature", temperature)
-        success2 = self.settings_manager.set("whisper", "prompt", prompt)
+        success1 = self.settings_manager.set(SettingsSection.WHISPER, WhisperSettings.TEMPERATURE, temperature)
+        success2 = self.settings_manager.set(SettingsSection.WHISPER, WhisperSettings.PROMPT, prompt)
         
         if success1 and success2:
-            print("Settings updated successfully")
+            log.info("Settings updated successfully")
         else:
-            print("Error saving settings")
+            log.error("Error saving settings")
         
         # Accept dialog
         self.accept()
@@ -346,14 +304,14 @@ class LogWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Whispex")
-        self.resize(700, 500)
+        self.resize(*LOG_WINDOW_SIZE)
         
         # Set icon for log window
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(script_dir, "whispex.png")
+        script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = script_dir / "whispex.png"
         
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QtGui.QIcon(icon_path))
+        if icon_path.exists():
+            self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         
         # Initialize tray_icon reference
         self.tray_icon = None
@@ -368,10 +326,6 @@ class LogWindow(QtWidgets.QDialog):
         clear_button = QtWidgets.QPushButton("Clear Log")
         clear_button.clicked.connect(self.clear_log)
         button_layout.addWidget(clear_button)
-        
-        check_audio_button = QtWidgets.QPushButton("Check Audio")
-        check_audio_button.clicked.connect(self.parent_check_audio)
-        button_layout.addWidget(check_audio_button)
         
         # Add settings button
         settings_button = QtWidgets.QPushButton("Settings")
@@ -392,12 +346,6 @@ class LogWindow(QtWidgets.QDialog):
         layout.addWidget(self.log_text)
         layout.addLayout(button_layout)
         self.setLayout(layout)
-    
-    def parent_check_audio(self):
-        # Access tray_icon instead of parent
-        if hasattr(self, 'tray_icon') and self.tray_icon and hasattr(self.tray_icon, 'check_audio_devices'):
-            self.append_text("🔍 Re-checking audio devices...")
-            self.tray_icon.check_audio_devices()
     
     def start_service(self):
         # Start service through tray_icon
@@ -441,12 +389,8 @@ if __name__ == "__main__":
     tray_icon.log_window.show()
     tray_icon.log_window.append_text("ℹ️ Using uv to run Python scripts")
     
-    # Check audio devices
-    tray_icon.check_audio_devices()
-    
     # Show message at startup
-    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whispex.png")
-    notification_icon = QtGui.QIcon(icon_path) if os.path.exists(icon_path) else QtGui.QIcon.fromTheme("audio-input-microphone")
+    notification_icon = QtGui.QIcon(str(tray_icon.icon_path)) if tray_icon.icon_path.exists() else QtGui.QIcon.fromTheme("audio-input-microphone")
     
     tray_icon.showMessage(
         "Whispex", 
