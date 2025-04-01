@@ -27,13 +27,14 @@
         },
         {
             "name": "Run whispex GUI",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/whispex-gui.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PYTHONUNBUFFERED": "1"
+                "PYTHONUNBUFFERED": "1",
+                "WHISPEX_LOG_LEVEL": "DEBUG"
             }
         }
     ]

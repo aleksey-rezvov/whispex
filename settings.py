@@ -1,10 +1,11 @@
 import os
 import shutil
+from enum import Enum
 from pathlib import Path
+from typing import Any, Optional, Union
+
 import tomli
 import tomli_w
-from enum import Enum
-from typing import Any, Union, Optional
 
 # Import common logger
 from logger import log
@@ -17,6 +18,8 @@ class GeneralSettings(Enum):
     INPUT_METHOD = "input_method"
     AUTO_OFF_TIME = "auto_off_time"
     NO_TYPE = "no_type"
+    INPUT_DEVICE = "input_device"
+    DEFAULT_DEVICE = "default_device"
 
 
 class WhisperSettings(Enum):

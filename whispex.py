@@ -147,12 +147,38 @@ def record_and_process():
             SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE
         )
 
-        app_state.stream = sd.InputStream(
-            samplerate=recording_samplerate,
-            channels=1,
-            blocksize=256,
-            callback=audio_callback,
+        # Check for input device configuration
+        use_default_device = settings_manager.get(
+            SettingsSection.GENERAL, GeneralSettings.DEFAULT_DEVICE, True
         )
+
+        device = None
+        if not use_default_device:
+            device_name = settings_manager.get(
+                SettingsSection.GENERAL, GeneralSettings.INPUT_DEVICE, ""
+            )
+            if device_name:
+                log.debug(f"Using custom input device: {device_name}")
+                device = device_name
+
+        if device:
+            log.debug(f"Opening audio stream with device: {device}")
+            app_state.stream = sd.InputStream(
+                samplerate=recording_samplerate,
+                device=device,
+                channels=1,
+                blocksize=256,
+                callback=audio_callback,
+            )
+        else:
+            log.debug("Opening audio stream with default device")
+            app_state.stream = sd.InputStream(
+                samplerate=recording_samplerate,
+                channels=1,
+                blocksize=256,
+                callback=audio_callback,
+            )
+
         app_state.stream.start()
         log.debug("Audio stream started successfully")
 

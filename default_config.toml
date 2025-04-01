@@ -11,6 +11,10 @@ input_method = "clipboard_ctrl_shift_v"
 no_type = false
 # Automatically exit after N seconds of inactivity (set to 0 to disable)
 auto_off_time = 0
+# Input device ID or name (empty for system default)
+input_device = ""
+# Whether to use the system default device
+default_device = true
 
 [whisper]
 # Temperature parameter for model (0.0 to 1.0)
@@ -34,4 +38,4 @@ When uncertain about a word or phrase, prioritize technical meaning over common 
 [openai]
 # Your OpenAI API key
 # api_key = "your-api-key-here"
-# If not specified, uses environment variable OPENAI_API_KEY 
+# If not specified, uses environment variable OPENAI_API_KEY
