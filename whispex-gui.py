@@ -20,7 +20,46 @@ LOG_WINDOW_SIZE = (700, 500)
 SETTINGS_DIALOG_SIZE = (700, 500)
 
 
+def main():
+    """Main application entry point"""
+    # Enable unbuffered output
+    os.environ['PYTHONUNBUFFERED'] = '1'
+
+    # Create Qt application
+    app = QtWidgets.QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)  # Don't close app when all windows closed
+
+    # Create main widget (needed to parent the tray icon)
+    main_widget = QtWidgets.QWidget()
+
+    # Create tray icon
+    tray_icon = WhisperTrayIcon(main_widget)
+    tray_icon.show()
+
+    # Set up log handler to display logs in the GUI
+    setup_gui_logging(tray_icon.log_window)
+
+    # Show the main window (log window) at start
+    tray_icon.log_window.show()
+    tray_icon.log_window.append_text("ℹ️ Application started")
+
+    # Show startup message
+    tray_icon.showMessage(
+        "Whispex",
+        "Speech recognition service is ready. Use Alt-Right key to start recording.",
+        tray_icon.icon(),
+        3000,
+    )
+
+    # Automatically start the speech recognition service
+    QtCore.QTimer.singleShot(1000, lambda: tray_icon.start_remote_whisper())
+
+    # Execute application
+    sys.exit(app.exec_())
+
+
 class OutputReaderThread(QtCore.QThread):
+    """Thread for reading process output without blocking the GUI"""
     output_received = QtCore.pyqtSignal(str)
 
     def __init__(self, process):
@@ -32,15 +71,15 @@ class OutputReaderThread(QtCore.QThread):
         import select
         import time
 
-        # Получаем файловые дескрипторы
+        # Get file descriptors for select
         stdout_fd = self.process.stdout.fileno()
         stderr_fd = self.process.stderr.fileno()
 
-        # Создаем список для select
+        # Create list for select
         read_list = [stdout_fd, stderr_fd]
 
         while not self._stop_flag and self.process.poll() is None:
-            # Используем select для неблокирующего чтения
+            # Use select for non-blocking read
             readable, _, _ = select.select(read_list, [], [], 0.1)
 
             for fd in readable:
@@ -53,10 +92,10 @@ class OutputReaderThread(QtCore.QThread):
                     if line:
                         self.output_received.emit(f"Error: {line}")
 
-            # Небольшая пауза для снижения нагрузки на CPU
+            # Small pause to reduce CPU load
             time.sleep(0.01)
 
-        # Прочитаем остатки после завершения процесса
+        # Read remaining output after process completion
         try:
             for line in self.process.stdout:
                 if line.strip():
@@ -64,8 +103,8 @@ class OutputReaderThread(QtCore.QThread):
             for line in self.process.stderr:
                 if line.strip():
                     self.output_received.emit(f"Error: {line.strip()}")
-        except:
-            pass
+        except (IOError, OSError) as e:
+            self.output_received.emit(f"Error reading remaining output: {e}")
 
         self.output_received.emit("Process completed.")
 
@@ -230,39 +269,44 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         if self.output_reader:
             self.log_window.append_text("Stopping output reader thread...")
             self.output_reader.stop()
-            # Не блокируем GUI ожиданием завершения потока
+            # Don't block GUI by waiting for thread completion
             # self.output_reader.wait()
             self.output_reader = None
 
         # Clean up process reference
-        if self.process:
+        process_to_terminate = self.process  # Store reference to process
+        if process_to_terminate:
             try:
-                self.log_window.append_text(f"Terminating process {self.process.pid}")
-                self.process.terminate()
+                self.log_window.append_text(f"Terminating process {process_to_terminate.pid}")
+                process_to_terminate.terminate()
 
-                # Ждем с таймаутом, но не блокируем GUI
+                # Wait with timeout without blocking GUI
                 import threading
                 def wait_for_process():
                     try:
-                        retcode = self.process.wait(timeout=2)
+                        retcode = process_to_terminate.wait(timeout=2)
                         self.log_window.append_text(f"Process terminated with code {retcode}")
                     except subprocess.TimeoutExpired:
                         self.log_window.append_text("Process termination timeout, sending SIGKILL")
-                        self.process.kill()
-                    except Exception as e:
+                        try:
+                            process_to_terminate.kill()
+                            process_to_terminate.wait(timeout=1)
+                        except (ProcessLookupError, OSError) as e:
+                            self.log_window.append_text(f"Error force killing process: {e}")
+                    except (ProcessLookupError, OSError) as e:
                         self.log_window.append_text(f"Error waiting for process: {e}")
 
-                # Запускаем ожидание в отдельном потоке
+                # Start waiting in a separate thread
                 wait_thread = threading.Thread(target=wait_for_process)
                 wait_thread.daemon = True
                 wait_thread.start()
-            except Exception as e:
+            except (ProcessLookupError, OSError) as e:
                 self.log_window.append_text(f"Error terminating process: {e}")
 
-            # Помечаем как закрытый даже если были ошибки с закрытием
+            # Mark as closed after initiating termination
             self.process = None
 
-        # Найдем и остановим все whispex процессы
+        # Find and stop all whispex processes
         try:
             self.log_window.append_text("Searching for whispex.py processes...")
             output = subprocess.run(
@@ -280,7 +324,11 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                     )
                     for pid in pids:
                         try:
-                            os.kill(int(pid), signal.SIGTERM)
+                            pid_int = int(pid)
+                            # Skip if it's our already terminated process
+                            if process_to_terminate and pid_int == process_to_terminate.pid:
+                                continue
+                            os.kill(pid_int, signal.SIGTERM)
                             self.log_window.append_text(
                                 f"Sent termination signal to process {pid}"
                             )
@@ -288,7 +336,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                             self.log_window.append_text(
                                 f"Process {pid} already terminated"
                             )
-                        except Exception as e:
+                        except OSError as e:
                             self.log_window.append_text(
                                 f"Error terminating process {pid}: {e}"
                             )
@@ -296,7 +344,7 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
                     self.log_window.append_text("No Whispex processes found")
             else:
                 self.log_window.append_text("No Whispex processes found")
-        except Exception as e:
+        except OSError as e:
             self.log_window.append_text(f"Error stopping Whispex processes: {e}")
             import traceback
             self.log_window.append_text(traceback.format_exc())
@@ -883,12 +931,12 @@ class LogWindow(QtWidgets.QDialog):
 
     @QtCore.pyqtSlot(str)
     def append_text(self, text):
-        # Оборачиваем вызов метода append в invokeMethod для безопасного вызова из других потоков
-        if QtCore.QThread.currentThread() == QtWidgets.QApplication.instance().thread():
-            # Если мы в главном потоке, вызываем напрямую
+        # Wrap append method call in invokeMethod for thread-safe calls
+        if QtCore.QThread.currentThread() == self.thread():
+            # If we're in the main thread, call directly
             self._append_text_direct(text)
         else:
-            # Если мы в другом потоке, используем invokeMethod
+            # If we're in another thread, use invokeMethod
             QtCore.QMetaObject.invokeMethod(
                 self,
                 "_append_text_direct",
@@ -898,53 +946,17 @@ class LogWindow(QtWidgets.QDialog):
 
     @QtCore.pyqtSlot(str)
     def _append_text_direct(self, text):
-        """Непосредственное добавление текста в лог (должно вызываться только из основного потока GUI)"""
+        """Direct text addition to log (must be called from main GUI thread only)"""
         self.log_text.append(text)
         # Scroll down
         scrollbar = self.log_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        if scrollbar:
+            scrollbar.setValue(scrollbar.maximum())
         # Force GUI update
         QtWidgets.QApplication.processEvents()
 
     def clear_log(self):
         self.log_text.clear()
-
-
-def main():
-    # Enable unbuffered output
-    os.environ['PYTHONUNBUFFERED'] = '1'
-
-    # Create Qt application
-    app = QtWidgets.QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)  # Don't close app when all windows closed
-
-    # Create main widget (needed to parent the tray icon)
-    main_widget = QtWidgets.QWidget()
-
-    # Create tray icon
-    tray_icon = WhisperTrayIcon(main_widget)
-    tray_icon.show()
-
-    # Set up log handler to display logs in the GUI
-    setup_gui_logging(tray_icon.log_window)
-
-    # Show the main window (log window) at start
-    tray_icon.log_window.show()
-    tray_icon.log_window.append_text("ℹ️ Application started")
-
-    # Show startup message
-    tray_icon.showMessage(
-        "Whispex",
-        "Speech recognition service is ready. Use Alt-Right key to start recording.",
-        tray_icon.icon(),
-        3000,
-    )
-
-    # Automatically start the speech recognition service
-    QtCore.QTimer.singleShot(1000, lambda: tray_icon.start_remote_whisper())
-
-    # Execute application
-    sys.exit(app.exec_())
 
 
 def setup_gui_logging(log_window):
@@ -957,8 +969,7 @@ def setup_gui_logging(log_window):
 
         def emit(self, record):
             msg = self.format(record)
-            # Безопасно добавляем лог через метод append_text, который сам
-            # разберется с вызовом из правильного потока
+            # Safely add log through append_text method which handles thread safety
             self.log_window.append_text(msg)
 
     # Create and add the custom handler
