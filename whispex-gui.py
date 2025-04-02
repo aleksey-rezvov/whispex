@@ -1,12 +1,16 @@
+import datetime
 import logging
 import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import tomli
 from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt
 
 # Import logger
 from logger import log
@@ -16,8 +20,608 @@ from settings import (GeneralSettings, OpenAISettings, SettingsManager,
 
 # Constants
 UV_RUN_COMMAND = ["uv", "run"]
-LOG_WINDOW_SIZE = (700, 500)
+LOG_WINDOW_SIZE = (900, 600)
 SETTINGS_DIALOG_SIZE = (700, 500)
+
+# Log entry types
+LOG_TYPE_SYSTEM = "system"
+LOG_TYPE_TRANSCRIPTION = "transcription"
+LOG_TYPE_ERROR = "error"
+LOG_TYPE_INFO = "info"
+LOG_TYPE_DEBUG = "debug"
+
+
+class LogEntry:
+    """Представляет запись в логе для отображения в таблице"""
+
+    def __init__(self,
+                 text: str,
+                 entry_type: str = LOG_TYPE_SYSTEM,
+                 timestamp: Optional[float] = None,
+                 audio_file: Optional[str] = None):
+        self.text = text
+        self.entry_type = entry_type
+        self.timestamp = timestamp or time.time()
+        self.audio_file = audio_file
+
+    @property
+    def time_str(self) -> str:
+        """Возвращает отформатированное время"""
+        return datetime.datetime.fromtimestamp(self.timestamp).strftime("%H:%M:%S")
+
+    @property
+    def has_audio(self) -> bool:
+        """Имеется ли аудиофайл для записи"""
+        return self.audio_file is not None and os.path.exists(self.audio_file)
+
+
+class LogTableModel(QAbstractTableModel):
+    """Модель данных для таблицы логов"""
+
+    # Определение колонок
+    COL_TIME = 0
+    COL_MESSAGE = 1
+    COL_PLAY = 2
+    COL_COPY = 3
+    COL_RECOG = 4
+
+    # Заголовки колонок
+    HEADERS = ["Время", "Сообщение", "Аудио", "Копировать", "Перераспознать"]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.entries: List[LogEntry] = []
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return len(self.entries)
+
+    def columnCount(self, parent=QModelIndex()) -> int:
+        return len(self.HEADERS)
+
+    def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole) -> Any:
+        if not index.isValid() or index.row() >= len(self.entries):
+            return None
+
+        entry = self.entries[index.row()]
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if index.column() == self.COL_TIME:
+                return entry.time_str
+            elif index.column() == self.COL_MESSAGE:
+                return entry.text
+            # Остальные колонки не отображают текст
+
+        elif role == Qt.ItemDataRole.ToolTipRole:
+            if index.column() == self.COL_PLAY and entry.has_audio:
+                return "Воспроизвести аудио"
+            elif index.column() == self.COL_COPY:
+                return "Копировать текст в буфер обмена"
+            elif index.column() == self.COL_RECOG and entry.has_audio:
+                return "Выполнить повторное распознавание"
+
+        elif role == Qt.ItemDataRole.TextAlignmentRole:
+            if index.column() == self.COL_TIME:
+                return int(Qt.AlignmentFlag.AlignCenter)
+
+        elif role == Qt.ItemDataRole.BackgroundRole:
+            if entry.entry_type == LOG_TYPE_ERROR:
+                return QtGui.QColor(255, 220, 220)  # Светло-красный для ошибок
+            elif entry.entry_type == LOG_TYPE_TRANSCRIPTION:
+                return QtGui.QColor(220, 255, 220)  # Светло-зеленый для распознанного текста
+            elif entry.entry_type == LOG_TYPE_DEBUG:
+                return QtGui.QColor(240, 240, 240)  # Серый для отладочных сообщений
+
+        return None
+
+    def headerData(self, section: int, orientation: Qt.Orientation, role=Qt.ItemDataRole.DisplayRole) -> Any:
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return self.HEADERS[section]
+        return None
+
+    def addEntry(self, entry: LogEntry) -> None:
+        """Добавляет запись в таблицу"""
+        self.beginInsertRows(QModelIndex(), len(self.entries), len(self.entries))
+        self.entries.append(entry)
+        self.endInsertRows()
+
+    def clear(self) -> None:
+        """Очищает все записи в таблице"""
+        self.beginResetModel()
+        self.entries.clear()
+        self.endResetModel()
+
+    def getEntry(self, row: int) -> Optional[LogEntry]:
+        """Возвращает запись по индексу строки"""
+        if 0 <= row < len(self.entries):
+            return self.entries[row]
+        return None
+
+
+class LogTableButtonDelegate(QtWidgets.QStyledItemDelegate):
+    """Делегат для отображения кнопок в таблице"""
+
+    # Сигналы для обработки нажатий
+    playClicked = QtCore.pyqtSignal(int)
+    copyClicked = QtCore.pyqtSignal(int)
+    recognizeClicked = QtCore.pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: QModelIndex) -> None:
+        """Отрисовка кнопок в ячейках"""
+        if not index.isValid():
+            return super().paint(painter, option, index)
+
+        model = index.model()
+        if not isinstance(model, LogTableModel) or index.row() >= model.rowCount():
+            return super().paint(painter, option, index)
+
+        entry = model.getEntry(index.row())
+        if not entry:
+            return super().paint(painter, option, index)
+
+        # Центрируем содержимое ячейки
+        option.displayAlignment = Qt.AlignmentFlag.AlignCenter
+
+        # Готовим кисть и перо
+        painter.save()
+
+        # Определяем цвет и состояние кнопки
+        enabled = False
+        text = ""
+
+        if index.column() == LogTableModel.COL_PLAY:
+            # Кнопка воспроизведения
+            text = "🔊"
+            enabled = entry.has_audio
+        elif index.column() == LogTableModel.COL_COPY:
+            # Кнопка копирования
+            text = "📋"
+            enabled = True
+        elif index.column() == LogTableModel.COL_RECOG:
+            # Кнопка перераспознавания
+            text = "🔄"
+            enabled = entry.has_audio
+        else:
+            # Для других колонок используем стандартную отрисовку
+            painter.restore()
+            return super().paint(painter, option, index)
+
+        # Фон кнопки
+        is_selected = (option.state & QtWidgets.QStyle.State_Selected) != 0
+        is_hover = (option.state & QtWidgets.QStyle.State_MouseOver) != 0
+
+        if is_selected:
+            # Если строка выбрана, используем цвет выделения
+            painter.setBrush(option.palette.highlight())
+        else:
+            # Иначе используем обычный фон или чуть темнее для наведения
+            if is_hover and enabled:
+                painter.setBrush(option.palette.mid())
+            else:
+                painter.setBrush(option.palette.button())
+
+        # Настраиваем цвет текста
+        if enabled:
+            painter.setPen(option.palette.buttonText().color())
+        else:
+            painter.setPen(option.palette.mid().color())
+
+        # Рисуем фон кнопки (скругленный прямоугольник)
+        button_rect = option.rect.adjusted(4, 4, -4, -4)
+        painter.drawRoundedRect(button_rect, 5, 5)
+
+        # Рисуем текст кнопки
+        painter.drawText(option.rect, int(Qt.AlignmentFlag.AlignCenter), text)
+
+        painter.restore()
+
+    def editorEvent(self, event: QtCore.QEvent, model: QAbstractTableModel,
+                   option: QtWidgets.QStyleOptionViewItem, index: QModelIndex) -> bool:
+        """Обработка событий нажатия на кнопки"""
+        if not isinstance(model, LogTableModel) or not index.isValid():
+            return super().editorEvent(event, model, option, index)
+
+        mouse_event = cast(QtGui.QMouseEvent, event)
+        if (event.type() == QtCore.QEvent.Type.MouseButtonRelease and
+            hasattr(mouse_event, 'button') and
+            mouse_event.button() == Qt.MouseButton.LeftButton):
+
+            entry = model.getEntry(index.row())
+            if not entry:
+                return False
+
+            if index.column() == LogTableModel.COL_PLAY and entry.has_audio and entry.audio_file:
+                self.playClicked.emit(index.row())
+                return True
+
+            elif index.column() == LogTableModel.COL_COPY:
+                self.copyClicked.emit(index.row())
+                return True
+
+            elif index.column() == LogTableModel.COL_RECOG and entry.has_audio:
+                self.recognizeClicked.emit(index.row())
+                return True
+
+        return super().editorEvent(event, model, option, index)
+
+    def sizeHint(self, option: QtWidgets.QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        """Определяет размер ячейки"""
+        size = super().sizeHint(option, index)
+
+        # Увеличиваем высоту ячеек для удобства нажатия на кнопки
+        if index.column() in [LogTableModel.COL_PLAY, LogTableModel.COL_COPY, LogTableModel.COL_RECOG]:
+            size.setHeight(max(size.height(), 30))
+
+        return size
+
+
+class AudioPlayer(QtCore.QObject):
+    """Класс для воспроизведения аудиофайлов"""
+
+    playbackFinished = QtCore.pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.process = None
+
+    def play(self, audio_file: str) -> bool:
+        """Воспроизводит аудиофайл"""
+        if not os.path.exists(audio_file):
+            return False
+
+        if self.process and self.process.poll() is None:
+            # Останавливаем текущий процесс воспроизведения
+            self.stop()
+
+        try:
+            # Используем subprocess для запуска плеера
+            # aplay для Linux, afplay для macOS, или можно использовать библиотеку PyAudio
+            if sys.platform == "linux":
+                self.process = subprocess.Popen(["aplay", audio_file])
+            elif sys.platform == "darwin":
+                self.process = subprocess.Popen(["afplay", audio_file])
+            else:
+                # Для Windows и других платформ можно использовать PyAudio
+                # или другие методы воспроизведения
+                log.warning(f"Audio playback not supported on platform: {sys.platform}")
+                return False
+
+            # Запускаем таймер для проверки завершения воспроизведения
+            self.timer = QtCore.QTimer()
+            self.timer.timeout.connect(self._check_playback)
+            self.timer.start(100)  # Проверяем каждые 100 мс
+
+            return True
+        except Exception as e:
+            log.error(f"Error playing audio: {e}")
+            return False
+
+    def stop(self) -> None:
+        """Останавливает воспроизведение"""
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+
+        if hasattr(self, 'timer') and self.timer.isActive():
+            self.timer.stop()
+
+    def _check_playback(self) -> None:
+        """Проверяет, завершилось ли воспроизведение"""
+        if self.process and self.process.poll() is not None:
+            self.timer.stop()
+            self.playbackFinished.emit()
+
+
+class LogWindow(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Whispex Voice Recognition")
+        self.resize(*LOG_WINDOW_SIZE)
+
+        # Set icon for log window
+        script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = script_dir / "whispex.png"
+
+        if icon_path.exists():
+            self.setWindowIcon(QtGui.QIcon(str(icon_path)))
+
+        # Initialize tray_icon reference
+        self.tray_icon = None
+
+        # Создаем аудио плеер
+        self.audio_player = AudioPlayer(self)
+
+        # Создаем модель данных для таблицы
+        self.log_model = LogTableModel(self)
+
+        # Создаем таблицу для отображения логов
+        self.log_table = QtWidgets.QTableView(self)
+        self.log_table.setModel(self.log_model)
+
+        # Настраиваем таблицу
+        self.log_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.log_table.setAlternatingRowColors(True)
+        vertical_header = self.log_table.verticalHeader()
+        if vertical_header:
+            vertical_header.setVisible(False)
+        self.log_table.setShowGrid(True)
+
+        # Настраиваем ширину колонок
+        self.log_table.setColumnWidth(LogTableModel.COL_TIME, 100)  # Время
+        self.log_table.setColumnWidth(LogTableModel.COL_PLAY, 60)   # Кнопка воспроизведения
+        self.log_table.setColumnWidth(LogTableModel.COL_COPY, 60)   # Кнопка копирования
+        self.log_table.setColumnWidth(LogTableModel.COL_RECOG, 60)  # Кнопка перераспознавания
+
+        # Растягиваем колонку с сообщением
+        header = self.log_table.horizontalHeader()
+        if header:
+            header.setSectionResizeMode(
+                LogTableModel.COL_MESSAGE,
+                QtWidgets.QHeaderView.ResizeMode.Stretch
+            )
+
+        # Создаем и настраиваем делегат для кнопок
+        self.button_delegate = LogTableButtonDelegate(self)
+        self.log_table.setItemDelegateForColumn(LogTableModel.COL_PLAY, self.button_delegate)
+        self.log_table.setItemDelegateForColumn(LogTableModel.COL_COPY, self.button_delegate)
+        self.log_table.setItemDelegateForColumn(LogTableModel.COL_RECOG, self.button_delegate)
+
+        # Подключаем сигналы делегата
+        self.button_delegate.playClicked.connect(self._on_play_clicked)
+        self.button_delegate.copyClicked.connect(self._on_copy_clicked)
+        self.button_delegate.recognizeClicked.connect(self._on_recognize_clicked)
+
+        # Добавляем приветственные сообщения
+        self.append_text("✨ Welcome to Whispex Voice Recognition ✨")
+        self.append_text("This application allows you to speak and have your voice transcribed to text.")
+        self.append_text("The text will be inserted at your cursor position.")
+        self.append_text("Status and log messages will appear here.")
+
+        # Create status bar
+        status_layout = QtWidgets.QHBoxLayout()
+
+        # Service status label
+        self.status_label = QtWidgets.QLabel("Service: Stopped")
+        status_layout.addWidget(self.status_label)
+
+        # API status
+        self.api_status = QtWidgets.QLabel("API: Unknown")
+        self.api_status.setStyleSheet("color: gray;")
+        status_layout.addWidget(self.api_status)
+
+        # Add spacer to push everything to the left
+        status_layout.addStretch()
+
+        # Create buttons
+        button_layout = QtWidgets.QHBoxLayout()
+
+        # Кнопка очистки лога
+        clear_button = QtWidgets.QPushButton("Clear Log")
+        clear_button.clicked.connect(self.clear_log)
+        button_layout.addWidget(clear_button)
+
+        # Add audio devices button
+        audio_devices_button = QtWidgets.QPushButton("Audio Devices")
+        audio_devices_button.clicked.connect(self.show_audio_devices)
+        button_layout.addWidget(audio_devices_button)
+
+        # Add settings button
+        settings_button = QtWidgets.QPushButton("Settings")
+        settings_button.clicked.connect(self.show_settings)
+        button_layout.addWidget(settings_button)
+
+        # Add control buttons
+        self.start_button = QtWidgets.QPushButton("Start")
+        self.start_button.clicked.connect(self.start_service)
+        button_layout.addWidget(self.start_button)
+
+        self.stop_button = QtWidgets.QPushButton("Stop")
+        self.stop_button.clicked.connect(self.stop_service)
+        self.stop_button.setEnabled(False)
+        button_layout.addWidget(self.stop_button)
+
+        # Create layout
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(self.log_table)
+        layout.addLayout(status_layout)
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def _on_play_clicked(self, row: int) -> None:
+        """Обрабатывает нажатие на кнопку воспроизведения"""
+        entry = self.log_model.getEntry(row)
+        if entry and entry.has_audio and entry.audio_file:
+            self.audio_player.play(entry.audio_file)
+
+    def _on_copy_clicked(self, row: int) -> None:
+        """Обрабатывает нажатие на кнопку копирования"""
+        entry = self.log_model.getEntry(row)
+        if entry:
+            clipboard = QtWidgets.QApplication.clipboard()
+            if clipboard:
+                clipboard.setText(entry.text)
+                # Показываем кратковременное сообщение об успешном копировании
+                self.append_text(f"✅ Текст скопирован в буфер обмена: '{entry.text[:30]}...'",
+                              entry_type=LOG_TYPE_INFO)
+
+    def _on_recognize_clicked(self, row: int) -> None:
+        """Обрабатывает нажатие на кнопку перераспознавания"""
+        entry = self.log_model.getEntry(row)
+        if entry and entry.has_audio:
+            # Здесь будет код для повторного распознавания
+            # Пока просто добавляем сообщение в лог
+            self.append_text(f"🔄 Повторное распознавание для аудио: {entry.audio_file}",
+                          entry_type=LOG_TYPE_INFO)
+            # TODO: Реализовать повторное распознавание
+
+    def show_audio_devices(self):
+        """Show information about available audio input devices"""
+        self.append_text("🎤 Checking audio input devices...", entry_type=LOG_TYPE_INFO)
+        try:
+            import sounddevice as sd
+            devices = sd.query_devices()
+
+            self.append_text(f"Found {len(devices)} audio devices:", entry_type=LOG_TYPE_INFO)
+
+            # Show input devices
+            input_devices = []
+            for i, device in enumerate(devices):
+                if isinstance(device, dict):
+                    max_input = device.get('max_input_channels', 0)
+                    if max_input > 0:
+                        name = device.get('name', f"Device {i}")
+                        input_devices.append((i, name, max_input))
+
+            if input_devices:
+                self.append_text("Input devices:", entry_type=LOG_TYPE_INFO)
+                for i, name, channels in input_devices:
+                    self.append_text(f"  [{i}] {name} ({channels} channels)", entry_type=LOG_TYPE_INFO)
+            else:
+                self.append_text("⚠️ No input devices found!", entry_type=LOG_TYPE_ERROR)
+
+            # Show current settings
+            settings_manager = self.tray_icon.settings_manager if self.tray_icon else None
+            if settings_manager:
+                use_default = settings_manager.get(
+                    SettingsSection.GENERAL, GeneralSettings.DEFAULT_DEVICE, True
+                )
+                device_name = settings_manager.get(
+                    SettingsSection.GENERAL, GeneralSettings.INPUT_DEVICE, ""
+                )
+
+                if use_default:
+                    self.append_text("Current setting: Using system default device", entry_type=LOG_TYPE_INFO)
+                elif device_name:
+                    self.append_text(f"Current setting: Using specific device '{device_name}'", entry_type=LOG_TYPE_INFO)
+                else:
+                    self.append_text("Current setting: Default (no device specified)", entry_type=LOG_TYPE_INFO)
+
+        except Exception as e:
+            self.append_text(f"❌ Error checking audio devices: {str(e)}", entry_type=LOG_TYPE_ERROR)
+
+    def update_status(self, running=False):
+        """Update display status based on service state"""
+        if running:
+            self.status_label.setText("Service: Running")
+            self.status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.start_button.setEnabled(False)
+            self.stop_button.setEnabled(True)
+        else:
+            self.status_label.setText("Service: Stopped")
+            self.status_label.setStyleSheet("color: red;")
+            self.start_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+
+    def update_api_status(self, connected=False):
+        """Update API connection status"""
+        if connected:
+            self.api_status.setText("API: Connected")
+            self.api_status.setStyleSheet("color: green;")
+        else:
+            self.api_status.setText("API: Not Connected")
+            self.api_status.setStyleSheet("color: red;")
+
+    def start_service(self):
+        # Start service through tray_icon
+        if (
+            hasattr(self, "tray_icon")
+            and self.tray_icon
+            and hasattr(self.tray_icon, "start_remote_whisper")
+        ):
+            self.append_text("🚀 Starting recognition service...", entry_type=LOG_TYPE_SYSTEM)
+            self.tray_icon.start_remote_whisper()
+            self.update_status(running=True)
+
+    def stop_service(self):
+        # Stop service through tray_icon
+        if (
+            hasattr(self, "tray_icon")
+            and self.tray_icon
+            and hasattr(self.tray_icon, "stop_whisper")
+        ):
+            self.append_text("🛑 Stopping recognition service...", entry_type=LOG_TYPE_SYSTEM)
+            self.tray_icon.stop_whisper()
+            self.update_status(running=False)
+
+    def show_settings(self):
+        # Show settings through tray_icon
+        if (
+            hasattr(self, "tray_icon")
+            and self.tray_icon
+            and hasattr(self.tray_icon, "show_settings")
+        ):
+            self.append_text("⚙️ Opening settings...", entry_type=LOG_TYPE_SYSTEM)
+            self.tray_icon.show_settings()
+
+    @QtCore.pyqtSlot(str)
+    def append_text(self, text, entry_type=LOG_TYPE_SYSTEM, audio_file=None):
+        # Wrap append method call in invokeMethod for thread-safe calls
+        if QtCore.QThread.currentThread() == self.thread():
+            # If we're in the main thread, call directly
+            self._append_text_direct(text, entry_type, audio_file)
+        else:
+            # If we're in another thread, use invokeMethod
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_append_text_direct",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, text),
+                QtCore.Q_ARG(str, entry_type),
+                QtCore.Q_ARG(str, audio_file if audio_file else "")
+            )
+
+    @QtCore.pyqtSlot(str, str, str)
+    def _append_text_direct(self, text, entry_type=LOG_TYPE_SYSTEM, audio_file=None):
+        """Direct text addition to log (must be called from main GUI thread only)"""
+        entry = LogEntry(text, entry_type, time.time(), audio_file)
+        self.log_model.addEntry(entry)
+
+        # Прокручиваем к последней записи
+        self.log_table.scrollToBottom()
+
+        # Force GUI update
+        QtWidgets.QApplication.processEvents()
+
+    def clear_log(self):
+        self.log_model.clear()
+
+
+def setup_gui_logging(log_window):
+    """Set up logging to display in the GUI log window"""
+    class LogHandler(logging.Handler):
+        def __init__(self, log_window):
+            super().__init__()
+            self.log_window = log_window
+            self.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+
+        def emit(self, record):
+            msg = self.format(record)
+
+            # Определяем тип сообщения на основе уровня логирования
+            if record.levelno >= logging.ERROR:
+                entry_type = LOG_TYPE_ERROR
+            elif record.levelno >= logging.WARNING:
+                entry_type = LOG_TYPE_INFO
+            elif record.levelno >= logging.DEBUG:
+                entry_type = LOG_TYPE_DEBUG
+            else:
+                entry_type = LOG_TYPE_SYSTEM
+
+            # Safely add log through append_text method which handles thread safety
+            self.log_window.append_text(msg, entry_type=entry_type)
+
+    # Create and add the custom handler
+    gui_handler = LogHandler(log_window)
+    gui_handler.setLevel(logging.INFO)  # Set level to INFO for the GUI
+
+    # Add handler to root logger
+    root_logger = logging.getLogger()
+    root_logger.addHandler(gui_handler)
 
 
 def main():
@@ -756,276 +1360,6 @@ class SettingsDialog(QtWidgets.QDialog):
         self.accept()
 
 
-class LogWindow(QtWidgets.QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Whispex Voice Recognition")
-        self.resize(*LOG_WINDOW_SIZE)
-
-        # Set icon for log window
-        script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-        icon_path = script_dir / "whispex.png"
-
-        if icon_path.exists():
-            self.setWindowIcon(QtGui.QIcon(str(icon_path)))
-
-        # Initialize tray_icon reference
-        self.tray_icon = None
-
-        # Create text widget for displaying log
-        self.log_text = QtWidgets.QTextEdit()
-        self.log_text.setReadOnly(True)
-
-        # Add a welcome message
-        self.append_text("✨ Welcome to Whispex Voice Recognition ✨")
-        self.append_text("This application allows you to speak and have your voice transcribed to text.")
-        self.append_text("The text will be inserted at your cursor position.")
-        self.append_text("\nStatus and log messages will appear here.\n")
-
-        # Create status bar
-        status_layout = QtWidgets.QHBoxLayout()
-
-        # Service status label
-        self.status_label = QtWidgets.QLabel("Service: Stopped")
-        status_layout.addWidget(self.status_label)
-
-        # API status
-        self.api_status = QtWidgets.QLabel("API: Unknown")
-        self.api_status.setStyleSheet("color: gray;")
-        status_layout.addWidget(self.api_status)
-
-        # Add spacer to push everything to the left
-        status_layout.addStretch()
-
-        # Create buttons
-        button_layout = QtWidgets.QHBoxLayout()
-
-        clear_button = QtWidgets.QPushButton("Clear Log")
-        clear_button.clicked.connect(self.clear_log)
-        button_layout.addWidget(clear_button)
-
-        # Add audio devices button
-        audio_devices_button = QtWidgets.QPushButton("Audio Devices")
-        audio_devices_button.clicked.connect(self.show_audio_devices)
-        button_layout.addWidget(audio_devices_button)
-
-        # Add settings button
-        settings_button = QtWidgets.QPushButton("Settings")
-        settings_button.clicked.connect(self.show_settings)
-        button_layout.addWidget(settings_button)
-
-        # Add control buttons
-        self.start_button = QtWidgets.QPushButton("Start")
-        self.start_button.clicked.connect(self.start_service)
-        button_layout.addWidget(self.start_button)
-
-        self.stop_button = QtWidgets.QPushButton("Stop")
-        self.stop_button.clicked.connect(self.stop_service)
-        self.stop_button.setEnabled(False)
-        button_layout.addWidget(self.stop_button)
-
-        # Create layout
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(self.log_text)
-        layout.addLayout(status_layout)
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
-
-    def show_audio_devices(self):
-        """Show information about available audio input devices"""
-        self.append_text("🎤 Checking audio input devices...")
-        try:
-            import sounddevice as sd
-            devices = sd.query_devices()
-
-            self.append_text(f"Found {len(devices)} audio devices:")
-
-            # Show input devices
-            input_devices = []
-            for i, device in enumerate(devices):
-                max_input = device.get('max_input_channels', 0)
-                if max_input > 0:
-                    name = device.get('name', f"Device {i}")
-                    input_devices.append((i, name, max_input))
-
-            if input_devices:
-                self.append_text("Input devices:")
-                for i, name, channels in input_devices:
-                    self.append_text(f"  [{i}] {name} ({channels} channels)")
-            else:
-                self.append_text("⚠️ No input devices found!")
-
-            # Show current settings
-            settings_manager = self.tray_icon.settings_manager if self.tray_icon else None
-            if settings_manager:
-                use_default = settings_manager.get(
-                    SettingsSection.GENERAL, GeneralSettings.DEFAULT_DEVICE, True
-                )
-                device_name = settings_manager.get(
-                    SettingsSection.GENERAL, GeneralSettings.INPUT_DEVICE, ""
-                )
-
-                if use_default:
-                    self.append_text("\nCurrent setting: Using system default device")
-                elif device_name:
-                    self.append_text(f"\nCurrent setting: Using specific device '{device_name}'")
-                else:
-                    self.append_text("\nCurrent setting: Default (no device specified)")
-
-        except Exception as e:
-            self.append_text(f"❌ Error checking audio devices: {str(e)}")
-
-    def update_status(self, running=False):
-        """Update display status based on service state"""
-        if running:
-            self.status_label.setText("Service: Running")
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
-            self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-        else:
-            self.status_label.setText("Service: Stopped")
-            self.status_label.setStyleSheet("color: red;")
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-
-    def update_api_status(self, connected=False):
-        """Update API connection status"""
-        if connected:
-            self.api_status.setText("API: Connected")
-            self.api_status.setStyleSheet("color: green;")
-        else:
-            self.api_status.setText("API: Not Connected")
-            self.api_status.setStyleSheet("color: red;")
-
-    def start_service(self):
-        # Start service through tray_icon
-        if (
-            hasattr(self, "tray_icon")
-            and self.tray_icon
-            and hasattr(self.tray_icon, "start_remote_whisper")
-        ):
-            self.append_text("🚀 Starting recognition service...")
-            self.tray_icon.start_remote_whisper()
-            self.update_status(running=True)
-
-    def stop_service(self):
-        # Stop service through tray_icon
-        if (
-            hasattr(self, "tray_icon")
-            and self.tray_icon
-            and hasattr(self.tray_icon, "stop_whisper")
-        ):
-            self.append_text("🛑 Stopping recognition service...")
-            self.tray_icon.stop_whisper()
-            self.update_status(running=False)
-
-    def show_settings(self):
-        # Show settings through tray_icon
-        if (
-            hasattr(self, "tray_icon")
-            and self.tray_icon
-            and hasattr(self.tray_icon, "show_settings")
-        ):
-            self.append_text("⚙️ Opening settings...")
-            self.tray_icon.show_settings()
-
-    @QtCore.pyqtSlot(str)
-    def append_text(self, text):
-        # Wrap append method call in invokeMethod for thread-safe calls
-        if QtCore.QThread.currentThread() == self.thread():
-            # If we're in the main thread, call directly
-            self._append_text_direct(text)
-        else:
-            # If we're in another thread, use invokeMethod
-            QtCore.QMetaObject.invokeMethod(
-                self,
-                "_append_text_direct",
-                QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, text)
-            )
-
-    @QtCore.pyqtSlot(str)
-    def _append_text_direct(self, text):
-        """Direct text addition to log (must be called from main GUI thread only)"""
-        self.log_text.append(text)
-        # Scroll down
-        scrollbar = self.log_text.verticalScrollBar()
-        if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())
-        # Force GUI update
-        QtWidgets.QApplication.processEvents()
-
-    def clear_log(self):
-        self.log_text.clear()
-
-
-def setup_gui_logging(log_window):
-    """Set up logging to display in the GUI log window"""
-    class LogHandler(logging.Handler):
-        def __init__(self, log_window):
-            super().__init__()
-            self.log_window = log_window
-            self.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-
-        def emit(self, record):
-            msg = self.format(record)
-            # Safely add log through append_text method which handles thread safety
-            self.log_window.append_text(msg)
-
-    # Create and add the custom handler
-    gui_handler = LogHandler(log_window)
-    gui_handler.setLevel(logging.INFO)  # Set level to INFO for the GUI
-
-    # Add handler to root logger
-    root_logger = logging.getLogger()
-    root_logger.addHandler(gui_handler)
-
-
-def check_dependencies():
-    """Check if all required dependencies are installed"""
-    try:
-        import numpy
-        import openai
-        import PyQt5
-        import sounddevice
-        import soundfile
-        return True
-    except ImportError as e:
-        print(f"Missing dependency: {e}")
-        return False
-
-
-def check_microphone_access():
-    """Check if application has access to microphone"""
-    try:
-        import sounddevice as sd
-        devices = sd.query_devices()
-        input_devices = [d for d in devices if d['max_input_channels'] > 0]
-
-        if not input_devices:
-            print("No input devices found!")
-            return False
-
-        print(f"Available input devices: {len(input_devices)}")
-        for device in input_devices:
-            print(f" - {device['name']}")
-
-        return True
-    except Exception as e:
-        print(f"Error checking microphone access: {e}")
-        return False
-
-
 if __name__ == "__main__":
-    # Check dependencies first
-    if not check_dependencies():
-        print("Missing dependencies. Please run 'uv pip install -e .'")
-        sys.exit(1)
-
-    # Check microphone access
-    if not check_microphone_access():
-        print("No microphone access. Please check your system settings.")
-        # We'll still launch the app, but it won't be able to record
-
     # Start main application
     main()
