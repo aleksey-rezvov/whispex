@@ -5,52 +5,22 @@ A voice dictation tool that uses OpenAI's Whisper model for transcription, espec
 ## Installation
 
 ```bash
-# Install uv
+# Install uv (Python package manager)
 curl -fsSL https://astral.sh/uv/install.sh | bash
 
-# Install dependencies using uv
-uv add numpy pynput pyperclip sounddevice soundfile openai tomli
-```
-
-## Development
-
-### Code Linting
-
-To maintain code quality, this project uses the `ruff` linter. First install development dependencies:
-
-```bash
-# Install development dependencies
-uv add --dev ruff
-```
-
-Run linting:
-
-```bash
-# Check for linting issues
-uv run --group dev ruff check . --exclude .venv
-
-# Check formatting issues
-uv run --group dev ruff format --check . --exclude .venv
-
-# Apply format fixes
-uv run --group dev ruff format . --exclude .venv
+# Clone repository (if you haven't already)
+git clone https://github.com/your-username/whispex.git
+cd whispex
 ```
 
 ## Configuration
 
-Whispex uses TOML format for configuration. The configuration is searched in the following order:
+Whispex uses TOML format for configuration. The configuration is managed through the GUI application in the Settings dialog. The configuration file is automatically created when you first run the application.
+
+Configuration is stored in the following locations:
 
 1. User configuration: `~/.config/whispex/config.toml`
 2. Default configuration: `default_config.toml` in the application directory
-
-To create your own configuration, run:
-
-```bash
-mkdir -p ~/.config/whispex
-cp default_config.toml ~/.config/whispex/config.toml
-```
-
-Then edit `~/.config/whispex/config.toml` with your preferred settings.
 
 ### Configuration Options
 
@@ -76,39 +46,81 @@ api_key = "your-api-key-here"
 
 ## Usage
 
+### Running the GUI Application (Recommended)
+
+The easiest way to use Whispex is through its GUI application:
+
 ```bash
-python whispex.py [options]
+# Run from project directory using uv
+uv run whispex-gui.py
 ```
 
-Or use the GUI application:
+The GUI will start in the system tray. Click the tray icon to show/hide the main window.
+
+> **Note**: `uv run` automatically installs the required dependencies from `pyproject.toml` when launching the application, so there's no need to manually install dependencies.
+
+### Desktop Integration
+
+To integrate Whispex with your desktop environment:
+
+1. Create a .desktop file:
+
+```bash
+# Create the desktop file in your applications directory
+mkdir -p ~/.local/share/applications
+cp Whispex.desktop ~/.local/share/applications/
+```
+
+2. Edit the desktop file to use the correct paths:
+
+```bash
+# Edit the desktop file to match your installation directory
+nano ~/.local/share/applications/Whispex.desktop
+```
+
+Update the `Exec=` and `Icon=` paths to point to your installation directory. For example:
 
 ```
-python whispex-gui.py
+[Desktop Entry]
+Type=Application
+Name=Whispex
+Comment=Voice-to-text dictation with OpenAI Whisper
+Exec=/path/to/your/uv run /path/to/your/whispex/whispex-gui.py
+Icon=/path/to/your/whispex/whispex.png
+Terminal=false
+Categories=Utility;Accessibility;
 ```
 
-### Options
+After this, Whispex should appear in your application menu.
 
-- `language` - Optional language code (overrides config file)
-- `--no-type` - Don't type the transcribed text
-- `--temperature VALUE` - Set temperature parameter (0.0-1.0)
-- `--prompt TEXT` - Custom prompt for the model
-- `--prompt @FILE` - Load prompt from a file
-- `--auto-off-time SECONDS` - Automatically exit after inactivity
+### Command Line Usage
+
+For command line usage, Whispex provides a shell script:
+
+```bash
+# Run the command line version
+./whispex-cli.sh
+```
+
+All settings are configured through the configuration file, as described in the Configuration section above.
 
 ### How to Use
 
 1. Make sure your microphone is working
-2. Run the script
+2. Run the application
 3. Press and hold the configured key (default: right Alt) to start recording
 4. Speak while holding the key
 5. Release the key to finish recording and get the transcription
 
-## Dependencies
+## Troubleshooting
 
-- Python 3.6+
-- OpenAI API key (set in config file or as environment variable OPENAI_API_KEY)
-- sounddevice
-- numpy
-- pynput
-- pyperclip
-- tomli
+### Microphone Access
+
+Ensure your system allows microphone access. You can check available audio devices in the GUI by clicking on the "Audio Devices" button.
+
+### API Key
+
+You need a valid OpenAI API key. You can set it in one of two ways:
+
+1. In the Settings dialog of the GUI application
+2. As an environment variable: `export OPENAI_API_KEY="your-key-here"`
