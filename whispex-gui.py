@@ -20,6 +20,30 @@ LOG_WINDOW_SIZE = (700, 500)
 SETTINGS_DIALOG_SIZE = (700, 500)
 
 
+class OutputReaderThread(QtCore.QThread):
+    output_received = QtCore.pyqtSignal(str)
+
+    def __init__(self, process):
+        super().__init__()
+        self.process = process
+        self._stop_flag = False
+
+    def run(self):
+        while not self._stop_flag and self.process.poll() is None:
+            # Read stdout
+            stdout_line = self.process.stdout.readline()
+            if stdout_line:
+                self.output_received.emit(stdout_line.rstrip())
+
+            # Read stderr
+            stderr_line = self.process.stderr.readline()
+            if stderr_line:
+                self.output_received.emit(f"Error: {stderr_line.rstrip()}")
+
+    def stop(self):
+        self._stop_flag = True
+
+
 class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -132,12 +156,25 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
             return False
 
         try:
-            # Start the whisper script in a separate process
-            subprocess.Popen(
-                UV_RUN_COMMAND + [str(self.script_path)], cwd=str(self.script_dir)
+            # Set environment variables
+            os.environ['PYTHONUNBUFFERED'] = '1'
+            os.environ['WHISPEX_LOG_LEVEL'] = 'DEBUG'
+
+            # Run process with direct console output - will show in terminal where GUI was launched
+            cmd = " ".join(UV_RUN_COMMAND + [str(self.script_path)])
+            self.log_window.append_text(f"Running command: {cmd}")
+
+            # Use subprocess.Popen without redirecting output - this will send it to the console
+            self.process = subprocess.Popen(
+                UV_RUN_COMMAND + [str(self.script_path)],
+                cwd=str(self.script_dir),
+                env=os.environ,
             )
 
-            self.log_window.append_text(f"Started {script_name}")
+            # Add a debug message in the log window
+            self.log_window.append_text(f"Started {script_name} with DEBUG logging")
+            self.log_window.append_text("NOTICE: Logs will appear in the terminal, not in this window")
+            self.log_window.append_text("Please check the console/terminal where you started this application")
             return True
         except Exception as e:
             self.log_window.append_text(f"Error starting {script_name}: {e}")
@@ -149,13 +186,22 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         """
         self.log_window.append_text("Stopping all Whispex processes...")
 
+        # Clean up process reference
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=1)
+            except:
+                pass
+            self.process = None
+
         # Stop all whispex processes
         try:
             output = subprocess.run(
                 ["pgrep", "-f", "whispex.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True,
+                text=True,
             )
 
             if output.returncode == 0:
@@ -185,7 +231,6 @@ class WhisperTrayIcon(QtWidgets.QSystemTrayIcon):
         except Exception as e:
             self.log_window.append_text(f"Error stopping Whispex processes: {e}")
             import traceback
-
             self.log_window.append_text(traceback.format_exc())
 
         # Update GUI state
