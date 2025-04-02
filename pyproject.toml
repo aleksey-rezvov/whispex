@@ -1,0 +1,44 @@
+[project]
+name = "whispex"
+version = "0.1.0"
+description = "Voice dictation tool using OpenAI's Whisper model for transcription"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.2.4",
+    "openai>=1.69.0",
+    "psutil>=7.0.0",
+    "pynput>=1.8.1",
+    "pyperclip>=1.9.0",
+    "pyqt5>=5.15.11",
+    "sounddevice>=0.5.1",
+    "soundfile>=0.13.1",
+    "tomli>=2.2.1",
+    "tomli-w>=1.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.2",
+]
+
+[tool.ruff]
+# Exclude .venv directory
+exclude = [".venv"]
+# Supported Python versions
+target-version = "py312"
+
+# Linter settings
+[tool.ruff.lint]
+# Enable pycodestyle (E) and pyflakes (F)
+select = ["E", "F"]
+# Ignore line length issues only
+ignore = [
+    "E501",  # Line too long
+]
+
+# Formatting settings
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

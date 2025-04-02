@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug whispex.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/whispex.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONUNBUFFERED": "1",
+                "WHISPEX_LOG_LEVEL": "DEBUG"
+            }
+        },
+        {
+            "name": "info whispex.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/whispex.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONUNBUFFERED": "1",
+                "WHISPEX_LOG_LEVEL": "INFO"
+            }
+        },
+        {
+            "name": "Run whispex GUI",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/whispex-gui.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONUNBUFFERED": "1",
+                "WHISPEX_LOG_LEVEL": "DEBUG"
+            }
+        }
+    ]
+}

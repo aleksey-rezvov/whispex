@@ -1,0 +1,41 @@
+# Default configuration for Whispex
+
+[general]
+# Language code for transcription (e.g. 'ru', 'en')
+language = "en"
+# Key used for push-to-talk recording (Python expression)
+rec_key = "pynput.keyboard.Key.alt_r"
+# Input method: "clipboard_ctrl_v", "clipboard_ctrl_shift_v", or "direct"
+input_method = "clipboard_ctrl_shift_v"
+# Don't type transcribed text if set to true
+no_type = false
+# Automatically exit after N seconds of inactivity (set to 0 to disable)
+auto_off_time = 0
+# Input device ID or name (empty for system default)
+input_device = ""
+# Whether to use the system default device
+default_device = true
+
+[whisper]
+# Temperature parameter for model (0.0 to 1.0)
+temperature = 0.2
+# Whisper sampling rate
+sample_rate = 16000
+# Recording sampling rate (should be a multiple of sample_rate)
+recording_sample_rate = 48000
+# Prompt for Whisper model to improve transcription accuracy
+prompt = """This is a transcription of a software developer speaking primarily in Russian, but frequently using English technical terms and phrases. The speaker is knowledgeable in computer science, software development, DevOps, and project management. They use technical jargon and industry terminology related to:
+- Software development and programming
+- System administration and DevOps
+- Software architecture and design patterns
+- Project management and requirements engineering
+- Databases and data structures
+- Algorithms and computational complexity
+- Cloud technologies and infrastructure
+
+When uncertain about a word or phrase, prioritize technical meaning over common usage. Preserve English technical terms even within Russian sentences. The speaker may switch between Russian and English mid-sentence when discussing technical concepts."""
+
+[openai]
+# Your OpenAI API key
+# api_key = "your-api-key-here"
+# If not specified, uses environment variable OPENAI_API_KEY

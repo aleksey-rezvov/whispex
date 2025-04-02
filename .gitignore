@@ -1,5 +1,5 @@
-.vscode
-venv
+/.cursor/rules
+.venv
 
 junk
 .env

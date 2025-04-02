@@ -1,6 +1,0 @@
-Do not translate Russian speech into English. Transcribe the Russian parts in Cyrillic as spoken.
-Preserve English technical terms exactly as they are, even when embedded within Russian sentences.
-Reflect code-switching between Russian and English naturally.
-Prioritize the technical meaning of ambiguous terms.
-Do not include commentary like “the speaker may switch languages.”
-Output only the transcript of the spoken content — no summaries, no descriptions.
