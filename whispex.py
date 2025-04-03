@@ -1,3 +1,5 @@
+import datetime
+import json
 import os
 import signal
 import sys
@@ -6,7 +8,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import psutil
@@ -19,8 +21,8 @@ from openai import OpenAI
 # Import logger
 from logger import log
 # Import settings manager with typed settings
-from settings import (GeneralSettings, OpenAISettings, SettingsManager,
-                      SettingsSection, WhisperSettings)
+from settings import (DataPathSettings, GeneralSettings, OpenAISettings,
+                      SettingsManager, SettingsSection, WhisperSettings)
 
 # Initialize settings manager
 settings_manager = SettingsManager()
@@ -209,7 +211,7 @@ def record_and_process():
 
         # Transcription
         log.debug("Starting audio transcription...")
-        text = get_text(recorded_audio)
+        text, transcription_data = get_text(recorded_audio)
         log.debug("Transcription completed")
         log.info(f"Transcribed: {text}")
 
@@ -222,26 +224,31 @@ def record_and_process():
 
 def get_text(audio, context=None):
     """
-    Send audio to OpenAI Whisper API for transcription.
+    Send audio to OpenAI Whisper API for transcription and save the results.
 
     Args:
         audio (numpy.ndarray): Audio data to transcribe
         context (str, optional): Prompt context for the model
 
     Returns:
-        str: Transcribed text
+        tuple: (transcribed_text, transcription_data_dict)
     """
-    # Create a temporary file in /tmp directory with the correct extension
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-        tmp_audio_filename = temp_file.name
+    # Create timestamp for unique filenames
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # Get storage directories from settings
+    base_dir, audio_dir = settings_manager.get_data_dirs()
+
+    # Generate filenames
+    audio_filename = f"audio_{timestamp}.wav"
+    audio_path = audio_dir / audio_filename
+    json_filename = f"transcription_{timestamp}.json"
+    json_path = base_dir / json_filename
+
+    # Get transcription parameters
     whisper_samplerate = settings_manager.get(
         SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE
     )
-    log.debug(f"Saving temporary audio file: {tmp_audio_filename}")
-    soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
-    log.debug("Temporary audio file saved")
-
     language = settings_manager.get(SettingsSection.GENERAL, GeneralSettings.LANGUAGE)
     temperature = settings_manager.get(
         SettingsSection.WHISPER, WhisperSettings.TEMPERATURE
@@ -249,9 +256,34 @@ def get_text(audio, context=None):
     prompt_text = settings_manager.get(SettingsSection.WHISPER, WhisperSettings.PROMPT)
     actual_prompt = context or prompt_text
 
+    # Save audio file permanently
+    log.debug(f"Saving audio file: {audio_path}")
+    soundfile.write(str(audio_path), audio, whisper_samplerate, format="wav")
+    log.debug("Audio file saved")
+
+    # Create a temporary file for API processing
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+        tmp_audio_filename = temp_file.name
+
+    log.debug(f"Saving temporary audio file for API: {tmp_audio_filename}")
+    soundfile.write(tmp_audio_filename, audio, whisper_samplerate, format="wav")
+
     log.info(
         f"OpenAI request: lang={language}, temp={temperature}, prompt_length={len(actual_prompt)}"
     )
+
+    transcription_data = {
+        "timestamp": timestamp,
+        "audio_file": str(Path("audio") / audio_filename),  # Relative path to audio file
+        "whisper_parameters": {
+            "language": language,
+            "temperature": temperature,
+            "prompt": actual_prompt,
+            "model": "whisper-1",
+            "sample_rate": whisper_samplerate
+        },
+        "text": ""
+    }
 
     try:
         # Create OpenAI client with API key
@@ -269,6 +301,21 @@ def get_text(audio, context=None):
         )
         log.debug("Response received from OpenAI Whisper API")
         result_text = api_response.text
+
+        # Store the result text
+        transcription_data["text"] = result_text
+
+        # Store API response details if available
+        if hasattr(api_response, "model_dump"):
+            response_dict = api_response.model_dump()
+            transcription_data["api_response"] = response_dict
+
+        # Save transcription data to JSON file
+        with open(json_path, 'w', encoding='utf-8') as json_file:
+            json.dump(transcription_data, json_file, ensure_ascii=False, indent=2)
+
+        log.info(f"Transcription data saved to: {json_path}")
+
     finally:
         # Remove the temporary file after use
         tmp_path = Path(tmp_audio_filename)
@@ -276,7 +323,7 @@ def get_text(audio, context=None):
             log.debug(f"Removing temporary audio file: {tmp_audio_filename}")
             tmp_path.unlink()
 
-    return result_text
+    return result_text, transcription_data
 
 
 def type_text(text):

@@ -11,10 +11,12 @@ dependencies = [
     "pynput>=1.8.1",
     "pyperclip>=1.9.0",
     "pyqt5>=5.15.11",
+    "pyqt6>=6.8.1",
     "sounddevice>=0.5.1",
     "soundfile>=0.13.1",
     "tomli>=2.2.1",
     "tomli-w>=1.2.0",
+    "watchdog>=6.0.0",
 ]
 
 [dependency-groups]

@@ -2,7 +2,7 @@ import os
 import shutil
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional, Tuple, Union
 
 import tomli
 import tomli_w
@@ -33,11 +33,18 @@ class OpenAISettings(Enum):
     API_KEY = "api_key"
 
 
+class DataPathSettings(Enum):
+    BASE_DIR = "base_dir"
+    AUDIO_DIR = "audio_dir"
+    TRANSCRIPTION_DIR = "transcription_dir"
+
+
 # Define settings sections
 class SettingsSection(Enum):
     GENERAL = "general"
     WHISPER = "whisper"
     OPENAI = "openai"
+    DATA_PATHS = "data_paths"
 
 
 class SettingsManager:
@@ -60,6 +67,9 @@ class SettingsManager:
 
         # Load settings
         self.load_settings()
+
+        # Initialize data directories
+        self._initialize_data_directories()
 
     def ensure_config_path(self):
         """
@@ -96,6 +106,55 @@ class SettingsManager:
                 return default_config_path
 
         return user_config_path
+
+    def _initialize_data_directories(self):
+        """
+        Initialize and create data directories for the application.
+        """
+        # Base directory is ~/.whispex
+        base_dir = Path.home() / ".whispex"
+        audio_dir = base_dir / "audio"
+
+        # Create directories if they don't exist
+        base_dir.mkdir(exist_ok=True)
+        audio_dir.mkdir(exist_ok=True)
+
+        # Add to settings
+        if SettingsSection.DATA_PATHS.value not in self.settings:
+            self.settings[SettingsSection.DATA_PATHS.value] = {}
+
+        self.settings[SettingsSection.DATA_PATHS.value][DataPathSettings.BASE_DIR.value] = str(base_dir)
+        self.settings[SettingsSection.DATA_PATHS.value][DataPathSettings.AUDIO_DIR.value] = str(audio_dir)
+
+        log.info(f"Data directories initialized: {base_dir}")
+
+    def get_data_dirs(self) -> Tuple[Path, Path]:
+        """
+        Get application data directories.
+
+        Returns:
+            Tuple[Path, Path]: Tuple of (base_dir, audio_dir)
+        """
+        # Get paths from settings
+        base_dir_str = self.get(SettingsSection.DATA_PATHS, DataPathSettings.BASE_DIR)
+        audio_dir_str = self.get(SettingsSection.DATA_PATHS, DataPathSettings.AUDIO_DIR)
+
+        # If not set in settings, use default
+        if not base_dir_str:
+            base_dir = Path.home() / ".whispex"
+        else:
+            base_dir = Path(base_dir_str)
+
+        if not audio_dir_str:
+            audio_dir = base_dir / "audio"
+        else:
+            audio_dir = Path(audio_dir_str)
+
+        # Ensure directories exist
+        base_dir.mkdir(exist_ok=True)
+        audio_dir.mkdir(exist_ok=True)
+
+        return base_dir, audio_dir
 
     def load_settings(self):
         """
@@ -134,7 +193,13 @@ class SettingsManager:
                     raise ValueError("OpenAI API key is not specified")
 
             # Required sections in the config
-            required_sections = [section.value for section in SettingsSection]
+            required_sections = [
+                section.value for section in [
+                    SettingsSection.GENERAL,
+                    SettingsSection.WHISPER,
+                    SettingsSection.OPENAI
+                ]
+            ]
 
             # Verify the config has all required sections
             for section in required_sections:
@@ -176,7 +241,7 @@ class SettingsManager:
     def get(
         self,
         section: Optional[Union[SettingsSection, str]],
-        key: Union[GeneralSettings, WhisperSettings, OpenAISettings, str],
+        key: Union[GeneralSettings, WhisperSettings, OpenAISettings, DataPathSettings, str],
         default: Any = None,
     ) -> Any:
         """
@@ -194,16 +259,20 @@ class SettingsManager:
         section_str = section.value if isinstance(section, SettingsSection) else section
         key_str = (
             key.value
-            if isinstance(key, (GeneralSettings, WhisperSettings, OpenAISettings))
+            if isinstance(key, (GeneralSettings, WhisperSettings, OpenAISettings, DataPathSettings))
             else key
         )
+
+        # Handle None values for section or key
+        if section_str is None or key_str is None:
+            return default
 
         return self.settings.get(section_str, {}).get(key_str, default)
 
     def set(
         self,
         section: Union[SettingsSection, str],
-        key: Union[GeneralSettings, WhisperSettings, OpenAISettings, str],
+        key: Union[GeneralSettings, WhisperSettings, OpenAISettings, DataPathSettings, str],
         value: Any,
     ) -> bool:
         """
@@ -221,7 +290,7 @@ class SettingsManager:
         section_str = section.value if isinstance(section, SettingsSection) else section
         key_str = (
             key.value
-            if isinstance(key, (GeneralSettings, WhisperSettings, OpenAISettings))
+            if isinstance(key, (GeneralSettings, WhisperSettings, OpenAISettings, DataPathSettings))
             else key
         )
 
