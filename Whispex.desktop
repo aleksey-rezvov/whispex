@@ -1,8 +1,18 @@
 [Desktop Entry]
-Type=Application
-Name=Whispex
-Comment=Voice-to-text dictation with OpenAI Whisper
-Exec=bash -c "cd $HOME/projects/ais/whispex && $HOME/.local/bin/uv run whispex-gui.py"
-Icon=$HOME/projects/ais/whispex/whispex.png
-Terminal=false
 Categories=Utility;Accessibility;
+Comment[en_US]=Voice-to-text dictation with OpenAI Whisper
+Comment=Voice-to-text dictation with OpenAI Whisper
+Exec=bash -c 'cd $HOME/projects/ais/whispex && $HOME/.local/bin/uv run whispex-gui.py'
+GenericName[en_US]=
+GenericName=
+Icon=/home/arezvov/projects/ais/whispex/whispex.png
+MimeType=
+Name[en_US]=Whispex
+Name=Whispex
+Path=
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=

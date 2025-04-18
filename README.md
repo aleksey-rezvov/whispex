@@ -98,19 +98,31 @@ After this, Whispex should appear in your application menu.
 For command line usage, Whispex provides a shell script:
 
 ```bash
-# Run the command line version
+# Run the command line version in interactive mode
 ./whispex-cli.sh
+
+# Transcribe an audio file directly and print to console
+./whispex-cli.sh -f /path/to/your/audio.wav
+
+# Transcribe an audio file and save to text file
+./whispex-cli.sh -f /path/to/your/audio.wav -o transcript.txt
 ```
 
 All settings are configured through the configuration file, as described in the Configuration section above.
 
 ### How to Use
 
-1. Make sure your microphone is working
-2. Run the application
-3. Press and hold the configured key (default: right Alt) to start recording
-4. Speak while holding the key
-5. Release the key to finish recording and get the transcription
+1. **Interactive Mode**
+   - Make sure your microphone is working
+   - Run the application
+   - Press and hold the configured key (default: right Alt) to start recording
+   - Speak while holding the key
+   - Release the key to finish recording and get the transcription
+
+2. **File Transcription Mode**
+   - Prepare an audio file in a supported format (WAV, MP3, etc.)
+   - Run the application with the `-f` or `--file` parameter
+   - The transcription will be printed to console or saved to the specified output file
 
 ## Troubleshooting
 

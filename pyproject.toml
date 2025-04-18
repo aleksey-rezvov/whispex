@@ -12,6 +12,7 @@ dependencies = [
     "pyperclip>=1.9.0",
     "pyqt5>=5.15.11",
     "pyqt6>=6.8.1",
+    "scipy>=1.13.0",
     "sounddevice>=0.5.1",
     "soundfile>=0.13.1",
     "tomli>=2.2.1",
@@ -20,9 +21,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "ruff>=0.11.2",
-]
+dev = ["ruff>=0.11.2"]
 
 [tool.ruff]
 # Exclude .venv directory
@@ -36,7 +35,7 @@ target-version = "py312"
 select = ["E", "F"]
 # Ignore line length issues only
 ignore = [
-    "E501",  # Line too long
+    "E501", # Line too long
 ]
 
 # Formatting settings

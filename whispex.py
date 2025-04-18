@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import json
 import os
@@ -47,8 +48,19 @@ app_state = AppState()
 
 def main():
     """Main function that runs the application."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Whispex - Speech to text with OpenAI Whisper")
+    parser.add_argument("-f", "--file", help="Audio file to transcribe", type=str)
+    parser.add_argument("--output", help="Output file for transcription text (default: print to console)", type=str)
+    args = parser.parse_args()
+
     # Initialize settings from config
     initialize_settings()
+
+    # If audio file is provided, process it and exit
+    if args.file:
+        process_audio_file(args.file, args.output)
+        return
 
     # Register handlers for various termination signals
     signal.signal(signal.SIGTERM, signal_handler)
@@ -510,6 +522,91 @@ def evaluate_key_string(key_string):
     # For regular keys, just return the character
     log.debug(f"Using character key: '{key_string}'")
     return key_string
+
+
+def process_audio_file(audio_file_path, output_file=None):
+    """
+    Process an audio file for transcription with Whisper API.
+
+    Args:
+        audio_file_path (str): Path to the audio file
+        output_file (str, optional): Path to save transcription text
+    """
+    try:
+        log.info(f"Processing audio file: {audio_file_path}")
+
+        # Verify file exists
+        file_path = Path(audio_file_path).expanduser().resolve()
+        if not file_path.exists():
+            log.error(f"Audio file not found: {file_path}")
+            return
+
+        # Load audio file
+        log.debug(f"Loading audio file: {file_path}")
+        whisper_samplerate = settings_manager.get(
+            SettingsSection.WHISPER, WhisperSettings.SAMPLE_RATE
+        )
+
+        try:
+            audio_data, file_samplerate = soundfile.read(file_path)
+        except Exception as e:
+            log.error(f"Error reading audio file: {e}")
+            log.info("Make sure the file is in a supported format (WAV, FLAC, OGG, etc.)")
+            return
+
+        log.info(f"Audio loaded: {file_path.name}, duration: {len(audio_data)/file_samplerate:.2f} seconds, sample rate: {file_samplerate}Hz")
+
+        # Convert to mono if needed
+        if len(audio_data.shape) > 1 and audio_data.shape[1] > 1:
+            log.debug("Converting stereo audio to mono")
+            audio_data = audio_data.mean(axis=1)
+
+        # Resample if necessary
+        if file_samplerate != whisper_samplerate:
+            log.debug(f"Resampling audio from {file_samplerate}Hz to {whisper_samplerate}Hz")
+            # For resampling, use scipy which handles both up and downsampling
+            try:
+                import scipy.signal
+                audio_data = scipy.signal.resample(audio_data,
+                                                  int(len(audio_data) * whisper_samplerate / file_samplerate))
+            except ImportError:
+                # Fallback to simple resampling if scipy isn't available
+                log.warning("scipy not available, using simple resampling")
+                # Calculate the ratio of samples
+                ratio = whisper_samplerate / file_samplerate
+                if ratio > 1:  # Upsampling
+                    log.warning("Upsampling without scipy may reduce quality")
+                    # Simple linear interpolation for upsampling
+                    indices = np.arange(0, len(audio_data), 1/ratio)
+                    indices = indices.astype(int)
+                    indices = np.minimum(indices, len(audio_data) - 1)
+                    audio_data = audio_data[indices]
+                else:  # Downsampling
+                    audio_data = audio_data[::int(1/ratio)]
+
+        # Transcribe audio
+        log.debug("Starting transcription process")
+        text, transcription_data = get_text(audio_data)
+        log.info(f"Transcription completed: {text}")
+
+        # Output or save transcription
+        if output_file:
+            # Resolve and expand output path
+            output_path = Path(output_file).expanduser().resolve()
+            # Make sure directory exists
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write to file
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            log.info(f"Transcription saved to: {output_path}")
+        else:
+            print(text)
+
+    except Exception as e:
+        log.error(f"Error processing audio file: {e}")
+        import traceback
+        log.debug(traceback.format_exc())
 
 
 if __name__ == "__main__":
