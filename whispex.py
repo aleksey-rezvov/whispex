@@ -163,34 +163,31 @@ def record_and_process():
                 log.debug(f"Using custom input device: {device_name}")
                 device = device_name
 
+        stream_params = {
+            "samplerate": recording_samplerate,
+            "channels": 1,
+            "blocksize": 256,
+            "callback": audio_callback,
+        }
         if device:
+            stream_params["device"] = device
             log.debug(f"Opening audio stream with device: {device}")
-            app_state.stream = sd.InputStream(
-                samplerate=recording_samplerate,
-                device=device,
-                channels=1,
-                blocksize=256,
-                callback=audio_callback,
-            )
         else:
             log.debug("Opening audio stream with default device")
-            app_state.stream = sd.InputStream(
-                samplerate=recording_samplerate,
-                channels=1,
-                blocksize=256,
-                callback=audio_callback,
-            )
 
-        app_state.stream.start()
-        log.debug("Audio stream started successfully")
+        # Use 'with' statement for guaranteed stream closure
+        with sd.InputStream(**stream_params) as stream:
+            app_state.stream = stream  # Store reference if needed elsewhere (e.g., signal handler)
+            log.debug("Audio stream started successfully")
 
-        while app_state.rec_key_pressed:
-            time.sleep(0.005)
+            while app_state.rec_key_pressed:
+                time.sleep(0.005)
 
-        app_state.stream.stop()
-        app_state.stream.close()
-        app_state.stream = None
-        log.debug("Audio recording stopped")
+            # Stream is automatically stopped and closed by the 'with' statement exiting
+            log.debug("Recording key released, stopping stream...")
+
+        app_state.stream = None # Clear reference after 'with' block exits
+        log.debug("Audio recording stopped and stream closed")
 
         if not audio_chunks:
             log.warning("No audio data recorded!")
@@ -218,8 +215,23 @@ def record_and_process():
         # Input text
         text = text + " "
         type_text(text)
+    except sd.PortAudioError as pae:
+        log.error(f"PortAudio error during recording setup: {pae}")
+        # Handle specific audio device errors if needed
     except Exception as e:
         log.error(f"Error during recording and processing: {str(e)}")
+        # Ensure stream is None if an error occurred before 'with' block finished
+        if app_state.stream is not None:
+             log.warning("Stream might not have been properly closed due to an early error.")
+             # Attempt to close just in case, though 'with' should handle most cases
+             try:
+                 if not app_state.stream.closed:
+                     app_state.stream.stop()
+                     app_state.stream.close()
+             except Exception as close_err:
+                 log.error(f"Error trying to close stream in exception handler: {close_err}")
+             finally:
+                 app_state.stream = None
 
 
 def get_text(audio, context=None):
