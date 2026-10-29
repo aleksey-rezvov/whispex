@@ -124,3 +124,12 @@ You need a valid OpenAI API key. You can set it in one of two ways:
 
 1. In the Settings dialog of the GUI application
 2. As an environment variable: `export OPENAI_API_KEY="your-key-here"`
+
+## Draft branches
+
+Work that never reached `dev` is kept on a branch of its own. Read one with `git fetch origin && git checkout <branch>`.
+
+| Branch | What it holds |
+| --- | --- |
+| `feature/more_control` | One commit past what `dev` merged, from 2025-04-18: transcription of audio files, the CLI usage notes, and the desktop entry as KDE's menu editor saves it. |
+| `drafts/audio-stream-with-block` | From 2025-04-19: the recording stream opens in a `with` block, so it always closes, and PortAudio errors are logged on their own. |
